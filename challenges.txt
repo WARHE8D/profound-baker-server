@@ -1,0 +1,2 @@
+Stop your local PostgreSQL service first before deploying postgres on docker
+save your time (Lost 2 days :D)
