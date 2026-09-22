@@ -1,4 +1,4 @@
-package com.sugarcrumbs.server.entity;
+package com.sugarcrumbs.server.dto;
 
 import lombok.Data;
 

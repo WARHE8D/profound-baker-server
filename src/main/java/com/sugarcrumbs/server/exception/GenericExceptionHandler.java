@@ -1,6 +1,6 @@
 package com.sugarcrumbs.server.exception;
 
-import com.sugarcrumbs.server.entity.ErrorResponse;
+import com.sugarcrumbs.server.dto.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
