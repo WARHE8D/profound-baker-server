@@ -1,4 +1,4 @@
-package com.sugarcrumbs.server.dto;
+package com.sugarcrumbs.server.dto.error;
 
 import lombok.Data;
 

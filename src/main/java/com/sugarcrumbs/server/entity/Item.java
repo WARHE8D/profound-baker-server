@@ -226,6 +226,24 @@ public class Item extends BaseEntity {
         return value;
     }
 
+    public void updateDescription(String newDescription) {
+        this.description = newDescription;
+    }
+
+    /**
+     * Overwrites the stock figure outright (e.g. from a full edit form).
+     * Use {@link #adjustStock(int)} instead when the intent is a relative
+     * change (an order was placed, a restock happened) — that method
+     * enforces "never goes negative"; this one is a direct correction and
+     * trusts the caller.
+     */
+    public void updateStockQuantity(Integer newStockQuantity) {
+        if (newStockQuantity != null && newStockQuantity < 0) {
+            throw new IllegalArgumentException("stockQuantity cannot be negative");
+        }
+        this.stockQuantity = newStockQuantity;
+    }
+
     // ---- Getters only; no public setters — see class javadoc ----
 
     public String getName() {
