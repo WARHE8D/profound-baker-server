@@ -3,41 +3,36 @@ package com.sugarcrumbs.server.service;
 import com.sugarcrumbs.server.dto.response.DayAvailabilityResponse;
 import com.sugarcrumbs.server.dto.response.TimeSlotResponse;
 import com.sugarcrumbs.server.entity.BlockedDate;
+import com.sugarcrumbs.server.entity.BookingStatus;
 import com.sugarcrumbs.server.entity.Owner;
 import com.sugarcrumbs.server.entity.WorkingHours;
+import com.sugarcrumbs.server.repository.booking.BookingRepository;
 import com.sugarcrumbs.server.repository.owner.BlockedDateRepository;
 import com.sugarcrumbs.server.repository.owner.WorkingHoursRepository;
+import com.sugarcrumbs.server.util.BusinessTimeZone;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.UUID;
-
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * The single place that answers "can a customer book this day/slot?" —
  * every other part of the app (browse-and-book flow, owner's calendar
- * view) should call this rather than combining {@link WorkingHours} and
- * {@link BlockedDate} themselves. Centralizing it here is what the
- * Sprint 3 planning notes call out specifically: this logic must not be
- * duplicated across endpoints.
+ * view) should call this rather than combining {@link WorkingHours},
+ * {@link BlockedDate} and {@link com.sugarcrumbs.server.entity.Booking} occupancy themselves.
  *
- * <p><b>Sprint 4 extension point:</b> {@link #bookedCount} always
- * returns 0 right now because no {@code BookingRepository} exists yet.
- * Once it does, that one method is the only thing that needs to change
- * — everything else here (the DTOs, the slot-generation loop, the
- * controllers) already accounts for a non-zero booked count via
- * {@code remainingCapacity}/{@code bookable}.
+ * <p>As of Sprint 4, {@link #bookedCount} is wired to the real
+ * {@link BookingRepository} — every non-cancelled booking in a slot
+ * counts against that slot's capacity. The one wrinkle: when
+ * {@code BookingService.reschedule} checks whether a booking's *new*
+ * time is free, that booking's own (about-to-change) row would
+ * otherwise count against itself. {@link #computeForDate(LocalDate, UUID)}
+ * exists for exactly that case — pass the booking's own id to exclude it
+ * from its own capacity count.
  */
 @Service
 @Transactional(readOnly = true)
@@ -48,19 +43,27 @@ public class AvailabilityService {
 
     private final WorkingHoursRepository workingHoursRepository;
     private final BlockedDateRepository blockedDateRepository;
+    private final BookingRepository bookingRepository;
     private final OwnerService ownerService;
 
     public AvailabilityService(WorkingHoursRepository workingHoursRepository,
                                BlockedDateRepository blockedDateRepository,
+                               BookingRepository bookingRepository,
                                OwnerService ownerService) {
         this.workingHoursRepository = workingHoursRepository;
         this.blockedDateRepository = blockedDateRepository;
+        this.bookingRepository = bookingRepository;
         this.ownerService = ownerService;
     }
 
     public DayAvailabilityResponse computeForDate(LocalDate date) {
+        return computeForDate(date, null);
+    }
+
+    /** @param excludeBookingId a booking to leave out of its own slot's occupancy count — see class javadoc */
+    public DayAvailabilityResponse computeForDate(LocalDate date, UUID excludeBookingId) {
         Owner owner = ownerService.getTheOwner();
-        return computeForDate(owner, date, blockedDateRepository.findAllByOwnerOrderByStartDateAsc(owner));
+        return computeForDate(owner, date, blockedDateRepository.findAllByOwnerOrderByStartDateAsc(owner), excludeBookingId);
     }
 
     public Map<LocalDate, DayAvailabilityResponse> computeForRange(LocalDate from, LocalDate to) {
@@ -76,12 +79,13 @@ public class AvailabilityService {
 
         Map<LocalDate, DayAvailabilityResponse> result = new LinkedHashMap<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
-            result.put(date, computeForDate(owner, date, blockedDates));
+            result.put(date, computeForDate(owner, date, blockedDates, null));
         }
         return result;
     }
 
-    private DayAvailabilityResponse computeForDate(Owner owner, LocalDate date, List<BlockedDate> blockedDates) {
+    private DayAvailabilityResponse computeForDate(Owner owner, LocalDate date, List<BlockedDate> blockedDates,
+                                                   UUID excludeBookingId) {
         BlockedDate blocking = blockedDates.stream()
                 .filter(bd -> bd.covers(date))
                 .findFirst()
@@ -96,11 +100,11 @@ public class AvailabilityService {
             return DayAvailabilityResponse.closed(date, "Closed on " + date.getDayOfWeek());
         }
 
-        return DayAvailabilityResponse.open(date, generateSlots(hours, date));
+        return DayAvailabilityResponse.open(date, generateSlots(hours, date, excludeBookingId));
     }
 
     /** Slots that don't evenly divide the working window are simply not offered — no partial trailing slot. */
-    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date) {
+    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date, UUID excludeBookingId) {
         List<TimeSlotResponse> slots = new ArrayList<>();
         LocalTime cursor = hours.getStartTime();
         while (true) {
@@ -109,7 +113,7 @@ public class AvailabilityService {
                 break;
             }
             int capacity = hours.getMaxConcurrentBookings();
-            int booked = bookedCount(date, cursor);
+            int booked = bookedCount(date, cursor, slotEnd, excludeBookingId);
             int remaining = Math.max(0, capacity - booked);
             slots.add(new TimeSlotResponse(cursor, slotEnd, capacity, remaining, remaining > 0));
             cursor = slotEnd;
@@ -121,16 +125,15 @@ public class AvailabilityService {
         return slots;
     }
 
-    /**
-     * TODO (Sprint 4): once {@code BookingRepository} exists, replace this
-     * with a real count of non-cancelled bookings whose
-     * {@code scheduledFor} falls in [{@code slotStart}, {@code slotStart}
-     * + slot duration) on {@code date}. Returning 0 here means every slot
-     * currently reports full capacity as remaining — correct for a
-     * calendar with no bookings yet, intentionally incomplete once real
-     * bookings exist.
-     */
-    private int bookedCount(LocalDate date, LocalTime slotStart) {
-        return 0;
+    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeBookingId) {
+        Instant slotStartInstant = date.atTime(slotStart).atZone(BusinessTimeZone.ZONE).toInstant();
+        Instant slotEndInstant = date.atTime(slotEnd).atZone(BusinessTimeZone.ZONE).toInstant();
+
+        if (excludeBookingId == null) {
+            return (int) bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
+                    slotStartInstant, slotEndInstant, BookingStatus.CANCELLED);
+        }
+        return (int) bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNotAndIdNot(
+                slotStartInstant, slotEndInstant, BookingStatus.CANCELLED, excludeBookingId);
     }
 }

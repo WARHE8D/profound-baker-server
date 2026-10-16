@@ -2,7 +2,9 @@ package com.sugarcrumbs.server.service;
 import com.sugarcrumbs.server.dto.request.ItemRequest;
 import com.sugarcrumbs.server.entity.Category;
 import com.sugarcrumbs.server.entity.Item;
+import com.sugarcrumbs.server.exception.ConflictException;
 import com.sugarcrumbs.server.exception.NotFoundException;
+import com.sugarcrumbs.server.repository.booking.BookingRepository;
 import com.sugarcrumbs.server.repository.item.ItemRepository;
 import com.sugarcrumbs.server.repository.item.ItemSpecifications;
 import org.springframework.data.domain.Page;
@@ -23,12 +25,14 @@ public class ItemService {
     private final ItemRepository itemRepository;
     private final CategoryService categoryService;
     private final ImageStorageService imageStorageService;
+    private final BookingRepository bookingRepository;
 
     public ItemService(ItemRepository itemRepository, CategoryService categoryService,
-                       ImageStorageService imageStorageService) {
+                       ImageStorageService imageStorageService, BookingRepository bookingRepository) {
         this.itemRepository = itemRepository;
         this.categoryService = categoryService;
         this.imageStorageService = imageStorageService;
+        this.bookingRepository = bookingRepository;
     }
 
     public Item create(ItemRequest request) {
@@ -122,18 +126,20 @@ public class ItemService {
     }
 
     /**
-     * Hard delete. Deliberately NOT guarded against existing bookings yet
-     * — {@code Booking} references {@code Item} by a non-nullable foreign
-     * key, so the database will reject this with a constraint violation
-     * (surfaced as 409 by {@code GlobalExceptionHandler}) rather than
-     * silently orphaning bookings. Once the booking sprint's repository
-     * exists, add an explicit pre-check here
-     * ({@code bookingRepository.existsByItemId(id)}) so the owner gets a
-     * clear message instead of a raw DB error. Prefer
+     * Hard delete. As of Sprint 4 this is guarded by an explicit
+     * pre-check against {@code BookingRepository}: an item with any
+     * booking history (past or present — cancelled ones included, since
+     * those still have real history worth keeping queryable) can't be
+     * deleted, so the owner gets a clear 409 instead of the DB rejecting
+     * a non-nullable foreign key with an opaque constraint error. Prefer
      * {@link #changeAvailability} to retire an item without deleting it.
      */
     public void delete(UUID id) {
         Item item = getOrThrow(id);
+        if (bookingRepository.existsByItemId(id)) {
+            throw new ConflictException(
+                    "cannot delete item '" + item.getName() + "': it has booking history. Mark it unavailable instead.");
+        }
         itemRepository.delete(item);
     }
 }
