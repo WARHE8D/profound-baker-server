@@ -72,8 +72,6 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
 - Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also
   uses `toHours()`, which rounds down. [#15]
 - No price snapshot, so repricing an item rewrites historical orders. [#14]
-- Optimistic-lock conflicts return 500. `ResourceNotFoundException` is unhandled. `DemoController` is a
-  leftover. Type mismatches and bad request bodies return 500. Unexpected exceptions aren't logged. [#7]
 - Uploaded images are written to `./uploads` but never served. [#8]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
 - Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
@@ -274,9 +272,12 @@ distributed locking, which is more complexity than a single baker needs.
   `ddl-auto=validate`. Never edit an applied migration. A new module needs its schema in `FlywayModulesConfig`.
 - Money is `BigDecimal` in `NUMERIC(10,2)` columns. Times are stored as `Instant` and converted with the Owner's
   time zone.
-- Errors: `IllegalArgument`/`IllegalState`, type mismatch and unreadable body return 400. `NotFoundException`
-  and `NoResourceFoundException` return 404. `ConflictException` and optimistic-lock failures return 409.
-  Everything else returns 500 and is logged. All errors use `ApiError`.
+- Errors (`common`'s `GlobalExceptionHandler`, which extends `ResponseEntityExceptionHandler`): `IllegalArgument`/
+  `IllegalState`, validation, type mismatch, missing parameter/part and unreadable body return 400. `NotFoundException`
+  and unknown paths return 404. `ConflictException`, `DataIntegrityViolationException` and every
+  `ConcurrencyFailureException` (optimistic and pessimistic lock failures) return 409. Other Spring MVC errors keep
+  their own status (405, 415, 413…). Everything else returns a generic 500 and is logged at WARN with its stack
+  trace. All errors use `ApiError`, and messages never include SQL or stack traces.
 - Paginate every list endpoint, with a max page size. Document every endpoint with springdoc.
 - Comments explain *why*, not *what*. Match the existing javadoc style.
 
