@@ -15,23 +15,23 @@ import java.util.Objects;
 public class Address {
 
     @Size(max = 200)
-    @Column(name = "street")
+    @Column(name = "street", length = 200)
     private String street;
 
     @Size(max = 100)
-    @Column(name = "city")
+    @Column(name = "city", length = 100)
     private String city;
 
     @Size(max = 100)
-    @Column(name = "region")
+    @Column(name = "region", length = 100)
     private String region;
 
     @Size(max = 20)
-    @Column(name = "postal_code")
+    @Column(name = "postal_code", length = 20)
     private String postalCode;
 
     @Size(max = 100)
-    @Column(name = "country")
+    @Column(name = "country", length = 100)
     private String country;
 
     protected Address() {

@@ -19,6 +19,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(
+        schema = "ordering",
         name = "blocked_dates",
         indexes = {
                 @Index(name = "idx_blocked_dates_owner", columnList = "owner_id"),

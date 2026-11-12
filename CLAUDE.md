@@ -76,9 +76,8 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
   leftover. Type mismatches and bad request bodies return 500. Unexpected exceptions aren't logged. [#7]
 - Uploaded images are written to `./uploads` but never served. [#8]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
-- `ddl-auto=update` with no Flyway migrations. [#4] DB credentials `admin/admin` are hard-coded. [#5]
-  The Dockerfile is a placeholder and packaging is `war`. [#6]
-- No tests beyond `contextLoads`. CI runs only CodeQL. [#9]
+- DB credentials `admin/admin` are hard-coded. [#5] The Dockerfile is a placeholder and packaging is `war`. [#6]
+- Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
 
 ---
 
@@ -123,9 +122,11 @@ Allowed dependencies (declared in each module's root `package-info.java` via `@A
 3. **No JPA relations across modules.** Store the other module's id as a plain `UUID` column
    (`Booking.itemId`, `WorkingHours.ownerId`, `BlockedDate.ownerId`), with no `@ManyToOne` and no FK constraint
    in new migrations.
-4. **Each module owns its tables.** Never query another module's tables, even though they share a database
-   today. Once Flyway lands (#4), use a separate migration location per module so the schemas can be split
-   into per-service databases later.
+4. **Each module owns its schema.** Every module has its own Postgres schema (`identity`, `catalog`,
+   `ordering`; entities declare `@Table(schema = …)`), its own migrations in
+   `<module>/src/main/resources/db/migration/<module>/`, and its own Flyway history table. `app`'s
+   `FlywayModulesConfig` runs one Flyway per module. Never query another module's schema, even though they
+   share a database today. Migrations use unqualified table names (Flyway sets `search_path`).
 5. **Reverse questions use extension points, not dependencies.** When catalog needs to know something only
    ordering knows (e.g. "is this item referenced?"), catalog publishes an interface (`ItemReferenceGuard`) and
    ordering implements it. For notifications, prefer domain events (`ApplicationEventPublisher`, Spring Modulith
@@ -153,7 +154,8 @@ Each step is mechanical when the rules above have been followed:
 2. Expose its `<Module>Api` as `/internal/**` endpoints that delegate to the existing implementation.
 3. In the consuming module, replace the in-process bean with a `RestClient` implementation of the same interface
    (timeouts, Resilience4j). Callers don't change.
-4. Point the module's Flyway location at its own database and copy its tables over.
+4. Move the module's schema to its own database (`pg_dump -n <schema>`, history table included) and point
+   the service's standard `spring.flyway.*` config at it (`schemas=<schema>`, same migration location).
 5. Add the gateway (Spring Cloud Gateway) and routes. Move events to a broker if anything consumes them across
    processes.
 
@@ -267,8 +269,9 @@ distributed locking, which is more complexity than a single baker needs.
   (`confirm()`, `reject(reason)`, `reprice(...)`) that enforce invariants. Keep the builder pattern.
 - Requests and responses are `record` DTOs, mapped with MapStruct. Entities never leave the service layer.
 - `@Transactional` goes on application services, with `readOnly = true` on read paths.
-- Schema changes go **only** through Flyway (`db/migration/V<n>__<desc>.sql`), with `ddl-auto=validate`. Never
-  edit an applied migration.
+- Schema changes go **only** through Flyway, in the owning module
+  (`<module>/src/main/resources/db/migration/<module>/V<n>__<desc>.sql`; versions are per module), with
+  `ddl-auto=validate`. Never edit an applied migration. A new module needs its schema in `FlywayModulesConfig`.
 - Money is `BigDecimal` in `NUMERIC(10,2)` columns. Times are stored as `Instant` and converted with the Owner's
   time zone.
 - Errors: `IllegalArgument`/`IllegalState`, type mismatch and unreadable body return 400. `NotFoundException`
@@ -293,7 +296,9 @@ distributed locking, which is more complexity than a single baker needs.
 - Contract tests for `CatalogApi` and `OwnerApi` behaviour, so the future HTTP implementations can be checked
   against the same suite.
 - GitHub Actions runs `./mvnw -B verify` on every push and PR. It must pass before merging.
-- `BakerApplicationTests.contextLoads` needs Postgres running until Testcontainers lands (#9).
+- Spring context tests `@Import(TestcontainersConfiguration.class)` (in `app` until the shared test-jar lands in
+  #9). They need Docker running, not a local database. `SchemaMigrationTests` checks that migrations apply,
+  that Hibernate validation passes, and that no FK crosses module schemas.
 
 ## 9. Commands
 

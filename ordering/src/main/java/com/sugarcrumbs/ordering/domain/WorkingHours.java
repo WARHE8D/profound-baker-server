@@ -25,6 +25,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(
+        schema = "ordering",
         name = "working_hours",
         uniqueConstraints = @UniqueConstraint(name = "uk_working_hours_owner_day", columnNames = {"owner_id", "day_of_week"}),
         indexes = @Index(name = "idx_working_hours_owner", columnList = "owner_id")

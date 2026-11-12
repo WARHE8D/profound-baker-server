@@ -60,6 +60,7 @@ import java.util.Objects;
  */
 @Entity
 @Table(
+        schema = "catalog",
         name = "items",
         indexes = {
                 @Index(name = "idx_items_category_id", columnList = "category_id"),
@@ -116,6 +117,7 @@ public class Item extends BaseEntity {
 
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(
+            schema = "catalog",
             name = "item_images",
             joinColumns = @JoinColumn(name = "item_id", foreignKey = @ForeignKey(name = "fk_item_images_item"))
     )

@@ -4,6 +4,7 @@ import com.sugarcrumbs.common.persistence.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -13,12 +14,16 @@ import jakarta.validation.constraints.Size;
  * (e.g. a display order or a parent category for subcategories).
  */
 @Entity
-@Table(name = "categories")
+@Table(
+        schema = "catalog",
+        name = "categories",
+        uniqueConstraints = @UniqueConstraint(name = "uk_categories_name", columnNames = "name")
+)
 public class Category extends BaseEntity {
 
     @NotBlank
     @Size(max = 100)
-    @Column(name = "name", nullable = false, unique = true, length = 100)
+    @Column(name = "name", nullable = false, length = 100)
     private String name;
 
     protected Category() {
