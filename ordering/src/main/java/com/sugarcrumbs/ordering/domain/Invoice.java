@@ -27,6 +27,7 @@ import java.util.Objects;
  */
 @Entity
 @Table(
+        schema = "ordering",
         name = "invoices",
         uniqueConstraints = @UniqueConstraint(name = "uk_invoices_booking", columnNames = "booking_id"),
         indexes = @Index(name = "idx_invoices_status", columnList = "status")

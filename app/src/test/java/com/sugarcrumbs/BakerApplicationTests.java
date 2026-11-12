@@ -2,9 +2,11 @@ package com.sugarcrumbs;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
-/** Needs a running Postgres (docker compose up) until Testcontainers lands in #9. */
+/** Runs against a Testcontainers Postgres; needs Docker, not a local database. */
 @SpringBootTest
+@Import(TestcontainersConfiguration.class)
 class BakerApplicationTests {
 
     @Test

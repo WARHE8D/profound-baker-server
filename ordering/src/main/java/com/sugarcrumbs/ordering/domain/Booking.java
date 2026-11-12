@@ -35,6 +35,7 @@ import java.util.UUID;
  */
 @Entity
 @Table(
+        schema = "ordering",
         name = "bookings",
         indexes = {
                 @Index(name = "idx_bookings_scheduled_for", columnList = "scheduled_for"),

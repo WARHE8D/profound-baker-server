@@ -29,6 +29,7 @@ import jakarta.validation.constraints.Size;
  */
 @Entity
 @Table(
+        schema = "identity",
         name = "owners",
         uniqueConstraints = @UniqueConstraint(name = "uk_owners_email", columnNames = "email")
 )
