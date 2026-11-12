@@ -35,3 +35,6 @@ build/
 notes.md
 # Runtime image uploads (local disk storage)
 /uploads/
+
+# Local secrets (copy .env.example)
+.env
