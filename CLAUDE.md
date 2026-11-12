@@ -62,7 +62,7 @@ The system is **single-tenant**: there is exactly one Owner. Don't add multi-ten
 
 A **modular monolith** (Spring Boot 4.1.1, Java 21, Spring Modulith 2.1) split into Maven modules `common`,
 `identity`, `catalog`, `ordering` and `app` (step A, done). Uses PostgreSQL 17 (docker-compose), JPA, MapStruct
-and springdoc. The `app` module is packaged as `app/target/baker.war`. See §3 for the module rules.
+and springdoc. The `app` module is packaged as an executable jar, `app/target/baker.jar`. See §3 for the module rules.
 
 Known problems (see the PLAN.md §2 table; the issue that fixes each one is in brackets):
 - **Spring Security is commented out** in `pom.xml`. Every endpoint is public, and `GET /api/bookings` leaks
@@ -76,7 +76,6 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
   leftover. Type mismatches and bad request bodies return 500. Unexpected exceptions aren't logged. [#7]
 - Uploaded images are written to `./uploads` but never served. [#8]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
-- The Dockerfile is a placeholder and packaging is `war`. [#6]
 - Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
 
 ---
@@ -263,8 +262,9 @@ distributed locking, which is more complexity than a single baker needs.
   before bumping either one.
 - Follow the module rules in §3. Put new code in the module that owns the concept; never add business logic to
   `common` or `app`.
-- `app` is still a **war** (`ServletInitializer`, provided Tomcat). #6 switches it to **jar**. Docker images use
-  multi-stage builds to `eclipse-temurin:21-jre` and run as a non-root user.
+- `app` is an executable **jar** (embedded Tomcat). The root `Dockerfile` is a multi-stage build (JDK + Maven, then a
+  layered jar on `eclipse-temurin:21-jre`) and runs as a non-root user. Tests don't run inside the image build;
+  CI runs them.
 - **Rich domain entities:** no public setters. State changes go through intention-revealing methods
   (`confirm()`, `reject(reason)`, `reprice(...)`) that enforce invariants. Keep the builder pattern.
 - Requests and responses are `record` DTOs, mapped with MapStruct. Entities never leave the service layer.
@@ -313,9 +313,14 @@ docker compose up -d                                  # Postgres (root docker-co
 ./mvnw -pl app spring-boot:run -Dspring-boot.run.profiles=dev   # run the app (after install)
 ./mvnw -pl app test -Dtest=ModularityTests            # boundary check only, no DB needed
 gh issue list                                         # roadmap work items
+
+# Production stack (Caddy + app + Postgres), also runnable locally with APP_DOMAIN=localhost:
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml down        # add -v to also drop its volumes
 ```
 
-Ports: app 8080, Postgres 5432. Planned: Prometheus 9090, Grafana 3000, Tempo 3200/4317. After the split:
+Ports: app 8080, Actuator 9080 (management port; internal only, never proxied by Caddy), Postgres 5432.
+In prod only Caddy publishes ports (80/443). Planned: Prometheus 9090, Grafana 3000, Tempo 3200/4317. After the split:
 gateway 8080, auth 8081, catalog 8082, order 8083.
 
 > ⚠️ Stop any locally installed PostgreSQL service before starting the Docker one, or both will fight over

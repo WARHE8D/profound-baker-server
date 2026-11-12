@@ -1,0 +1,17 @@
+# Public entry point. Caddy obtains and renews the TLS certificate for APP_DOMAIN automatically
+# (use APP_DOMAIN=localhost to try it locally with Caddy's internal CA).
+#
+# Only the API port is proxied. Actuator (port 9080) is never routed, so it stays internal.
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy app:8080
+}
