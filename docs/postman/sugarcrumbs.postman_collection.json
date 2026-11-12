@@ -1,0 +1,1800 @@
+{
+  "info": {
+    "name": "SugarCrumbs API (local)",
+    "description": "Local API for the SugarCrumbs baker backend (modular monolith on branch refactor/modular-monolith).\n\n**No auth yet**: every endpoint is open until #10 lands.\n\n**Suggested order:** Catalog \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Bookings \u2192 Create booking \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, bookingId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Booking times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, booked item and bookings in the DB: booked items can't be deleted until #14.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Recomputed before every request so dates are always in the future.",
+          "const pad = n => String(n).padStart(2, '0');",
+          "const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;",
+          "const plusDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return d; };",
+          "pm.collectionVariables.set('tomorrow', ymd(plusDays(1)));",
+          "pm.collectionVariables.set('dayAfterTomorrow', ymd(plusDays(2)));",
+          "pm.collectionVariables.set('nextWeek', ymd(plusDays(7)));",
+          "// The server reads booking times in its own zone (same machine), so send the local offset.",
+          "const off = -new Date().getTimezoneOffset();",
+          "pm.collectionVariables.set('tzOffset', `${off >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`);"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "categoryId",
+      "value": ""
+    },
+    {
+      "key": "itemId",
+      "value": ""
+    },
+    {
+      "key": "bookingId",
+      "value": ""
+    },
+    {
+      "key": "blockedDateId",
+      "value": ""
+    },
+    {
+      "key": "tomorrow",
+      "value": ""
+    },
+    {
+      "key": "dayAfterTomorrow",
+      "value": ""
+    },
+    {
+      "key": "nextWeek",
+      "value": ""
+    },
+    {
+      "key": "tzOffset",
+      "value": ""
+    },
+    {
+      "key": "tmpCategoryId",
+      "value": ""
+    },
+    {
+      "key": "slotAt",
+      "value": ""
+    },
+    {
+      "key": "rescheduleAt",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Catalog (front page items)",
+      "item": [
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "List categories",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                      "if (pm.response.code === 201) {",
+                      "    pm.collectionVariables.set('categoryId', pm.response.json().id);",
+                      "    console.log('categoryId =', pm.collectionVariables.get('categoryId'));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Breads {{$timestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Names must be unique. Saves `categoryId`."
+              }
+            },
+            {
+              "name": "Rename category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{categoryId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{categoryId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Artisan Breads {{$timestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Create category to delete",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                      "if (pm.response.code === 201) {",
+                      "    pm.collectionVariables.set('tmpCategoryId', pm.response.json().id);",
+                      "    console.log('tmpCategoryId =', pm.collectionVariables.get('tmpCategoryId'));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Temporary {{$timestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Throwaway category for the delete request below. The main `categoryId` is kept because items and bookings later in the run depend on it. Saves `tmpCategoryId`."
+              }
+            },
+            {
+              "name": "Delete category (empty)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{tmpCategoryId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{tmpCategoryId}}"
+                  ]
+                },
+                "description": "Fails with 409 while items still use the category."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Items",
+          "item": [
+            {
+              "name": "List items (all)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items?categoryId={{categoryId}}&available=true&search=cake&page=0&size=20&sort=name,asc",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items"
+                  ],
+                  "query": [
+                    {
+                      "key": "categoryId",
+                      "value": "{{categoryId}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "available",
+                      "value": "true",
+                      "disabled": true
+                    },
+                    {
+                      "key": "search",
+                      "value": "cake",
+                      "disabled": true,
+                      "description": "case-insensitive, name or description"
+                    },
+                    {
+                      "key": "page",
+                      "value": "0",
+                      "disabled": true
+                    },
+                    {
+                      "key": "size",
+                      "value": "20",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sort",
+                      "value": "name,asc",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "All filters are optional; enable any of them."
+              }
+            },
+            {
+              "name": "Create item",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                      "if (pm.response.code === 201) {",
+                      "    pm.collectionVariables.set('itemId', pm.response.json().id);",
+                      "    console.log('itemId =', pm.collectionVariables.get('itemId'));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cinnamon Roll\",\n  \"description\": \"Soft roll with cream cheese icing\",\n  \"price\": 4.5,\n  \"categoryId\": \"{{categoryId}}\",\n  \"leadTimeHours\": 0,\n  \"stockQuantity\": 12\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "`stockQuantity: null` (or omitted) means unlimited stock. Saves `itemId`."
+              }
+            },
+            {
+              "name": "Get item",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Update item details",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Cinnamon Roll\",\n  \"description\": \"Now with pecans\",\n  \"price\": 4.75,\n  \"categoryId\": \"{{categoryId}}\",\n  \"leadTimeHours\": 2,\n  \"stockQuantity\": 12\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Mark unavailable / available",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/availability",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "availability"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"available\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Unavailable items can't be booked."
+              }
+            },
+            {
+              "name": "Adjust stock (delta)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/stock",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "stock"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"delta\": 5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Negative to decrement. Fails for unlimited-stock items."
+              }
+            },
+            {
+              "name": "Change price",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/price",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "price"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"price\": 5.0\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Add image by URL",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "images"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"url\": \"https://example.com/cinnamon-roll.jpg\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Upload image file",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images/upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "images",
+                    "upload"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": "docs/postman/fixtures/sample-item.png"
+                    }
+                  ]
+                },
+                "description": "Uploads `docs/postman/fixtures/sample-item.png` (path relative to the repo root: run the CLI from there, or set it as the Postman app working directory). PNG/JPEG/WEBP only, max 10MB. Uploaded files aren't served yet (#8)."
+              }
+            },
+            {
+              "name": "Remove image",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images?url=https://example.com/cinnamon-roll.jpg",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}",
+                    "images"
+                  ],
+                  "query": [
+                    {
+                      "key": "url",
+                      "value": "https://example.com/cinnamon-roll.jpg"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Delete item",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "items",
+                    "{{itemId}}"
+                  ]
+                },
+                "description": "409 if any booking references the item; mark it unavailable instead."
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Owner-managed items shown on the storefront."
+    },
+    {
+      "name": "Availability",
+      "item": [
+        {
+          "name": "Availability for tomorrow (slots)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/availability?date={{tomorrow}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{tomorrow}}"
+                }
+              ]
+            },
+            "description": "Always returns a list of days."
+          }
+        },
+        {
+          "name": "Availability for a range",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/availability?from={{tomorrow}}&to={{nextWeek}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "{{tomorrow}}"
+                },
+                {
+                  "key": "to",
+                  "value": "{{nextWeek}}"
+                }
+              ]
+            },
+            "description": "Max 62 days."
+          }
+        },
+        {
+          "name": "Working hours",
+          "item": [
+            {
+              "name": "List working hours",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/working-hours",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "working-hours"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Set hours for a day",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/working-hours/SATURDAY",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "working-hours",
+                    "SATURDAY"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"startTime\": \"09:00\",\n  \"endTime\": \"17:00\",\n  \"slotDurationMinutes\": 60,\n  \"maxConcurrentBookings\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Idempotent upsert. Day is MONDAY..SUNDAY."
+              }
+            },
+            {
+              "name": "Close a day (remove hours)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/working-hours/SUNDAY",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "working-hours",
+                    "SUNDAY"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Blocked dates (not available)",
+          "item": [
+            {
+              "name": "List blocked dates",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/blocked-dates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "blocked-dates"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Block a date range",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                      "if (pm.response.code === 201) {",
+                      "    pm.collectionVariables.set('blockedDateId', pm.response.json().id);",
+                      "    console.log('blockedDateId =', pm.collectionVariables.get('blockedDateId'));",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/blocked-dates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "blocked-dates"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"startDate\": \"{{nextWeek}}\",\n  \"endDate\": \"{{nextWeek}}\",\n  \"reason\": \"Family event\",\n  \"recurringAnnually\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Update blocked date",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/blocked-dates/{{blockedDateId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "blocked-dates",
+                    "{{blockedDateId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"startDate\": \"{{nextWeek}}\",\n  \"endDate\": \"{{nextWeek}}\",\n  \"reason\": \"Family event (moved)\",\n  \"recurringAnnually\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Unblock (delete)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/availability/blocked-dates/{{blockedDateId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "availability",
+                    "blocked-dates",
+                    "{{blockedDateId}}"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Working hours + blocked dates decide which slots guests can book."
+    },
+    {
+      "name": "Bookings (orders)",
+      "item": [
+        {
+          "name": "Create item to book",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('itemId', pm.response.json().id);",
+                  "    console.log('itemId =', pm.collectionVariables.get('itemId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Cinnamon Roll\",\n  \"description\": \"Soft roll with cream cheese icing\",\n  \"price\": 4.5,\n  \"categoryId\": \"{{categoryId}}\",\n  \"leadTimeHours\": 0,\n  \"stockQuantity\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The Items folder deletes its item, so bookings get a fresh one (lead time 0, available). Saves `itemId`."
+          }
+        },
+        {
+          "name": "Create booking (guest checkout)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
+                  "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
+                  "const v = k => pm.collectionVariables.get(k);",
+                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "    if (err) { throw err; }",
+                  "    for (const day of res.json()) {",
+                  "        const slot = (day.slots || []).find(s => s.bookable);",
+                  "        if (slot) {",
+                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
+                  "            return;",
+                  "        }",
+                  "    }",
+                  "    throw new Error('no bookable slot between tomorrow and next week: set working hours first');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
+                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`scheduledFor` must be the start of a bookable slot. Saves `bookingId`."
+          }
+        },
+        {
+          "name": "List bookings (owner view)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings?status=PENDING&from={{tomorrow}}T00:00:00{{tzOffset}}&to={{nextWeek}}T00:00:00{{tzOffset}}&page=0&size=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "disabled": true,
+                  "description": "PENDING|CONFIRMED|IN_PROGRESS|FULFILLED|CANCELLED"
+                },
+                {
+                  "key": "from",
+                  "value": "{{tomorrow}}T00:00:00{{tzOffset}}",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "{{nextWeek}}T00:00:00{{tzOffset}}",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "0",
+                  "disabled": true
+                },
+                {
+                  "key": "size",
+                  "value": "50",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "All filters optional; from+to must be used together."
+          }
+        },
+        {
+          "name": "Get booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Accept booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "confirm"
+              ]
+            },
+            "description": "PENDING \u2192 CONFIRMED"
+          }
+        },
+        {
+          "name": "Start preparation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/start-preparation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "start-preparation"
+              ]
+            },
+            "description": "CONFIRMED \u2192 IN_PROGRESS"
+          }
+        },
+        {
+          "name": "Mark fulfilled",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/fulfill",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "fulfill"
+              ]
+            },
+            "description": "CONFIRMED/IN_PROGRESS \u2192 FULFILLED"
+          }
+        },
+        {
+          "name": "Create booking to reschedule and cancel",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
+                  "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
+                  "const v = k => pm.collectionVariables.get(k);",
+                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "    if (err) { throw err; }",
+                  "    for (const day of res.json()) {",
+                  "        const slot = (day.slots || []).find(s => s.bookable);",
+                  "        if (slot) {",
+                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
+                  "            return;",
+                  "        }",
+                  "    }",
+                  "    throw new Error('no bookable slot between tomorrow and next week: set working hours first');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
+                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Second booking (PENDING) used for reschedule and cancel. Saves `bookingId`."
+          }
+        },
+        {
+          "name": "Reschedule booking",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
+                  "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
+                  "const v = k => pm.collectionVariables.get(k);",
+                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "    if (err) { throw err; }",
+                  "    for (const day of res.json()) {",
+                  "        const slot = (day.slots || []).find(s => s.bookable);",
+                  "        if (slot) {",
+                  "            pm.collectionVariables.set('rescheduleAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            console.log('rescheduleAt =', pm.collectionVariables.get('rescheduleAt'));",
+                  "            return;",
+                  "        }",
+                  "    }",
+                  "    throw new Error('no bookable slot between tomorrow and next week: set working hours first');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "schedule"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scheduledFor\": \"{{rescheduleAt}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancel booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer called to cancel\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Releases slot capacity and tracked stock."
+          }
+        },
+        {
+          "name": "Create booking to reject",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
+                  "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
+                  "const v = k => pm.collectionVariables.get(k);",
+                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "    if (err) { throw err; }",
+                  "    for (const day of res.json()) {",
+                  "        const slot = (day.slots || []).find(s => s.bookable);",
+                  "        if (slot) {",
+                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
+                  "            return;",
+                  "        }",
+                  "    }",
+                  "    throw new Error('no bookable slot between tomorrow and next week: set working hours first');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
+                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Third booking (PENDING) for the owner to reject. Saves `bookingId`."
+          }
+        },
+        {
+          "name": "Reject booking",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bookings",
+                "{{bookingId}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Fully booked that day\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "PENDING \u2192 CANCELLED with a reason. A distinct REJECTED status is planned (#16)."
+          }
+        }
+      ],
+      "description": "Guest orders and the owner's accept/reject workflow."
+    },
+    {
+      "name": "Cleanup checks",
+      "description": "Runs last. Data from the run stays in the DB: booked items can't be deleted yet (#14).",
+      "item": [
+        {
+          "name": "Delete booked item (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "description": "Bookings still reference this item, so `ItemReferenceGuard` refuses the delete. That stops once orders keep snapshots and items are soft-deleted (#14)."
+          }
+        },
+        {
+          "name": "Delete category with items (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{categoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "{{categoryId}}"
+              ]
+            },
+            "description": "The category still holds the booked item, so the delete is refused."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Docs",
+      "item": [
+        {
+          "name": "OpenAPI spec",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v3/api-docs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v3",
+                "api-docs"
+              ]
+            },
+            "description": "Swagger UI: {{baseUrl}}/swagger-ui.html. Postman can also import this spec directly."
+          }
+        }
+      ]
+    }
+  ]
+}

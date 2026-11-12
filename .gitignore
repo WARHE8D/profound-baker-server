@@ -33,3 +33,5 @@ build/
 .vscode/
 
 notes.md
+# Runtime image uploads (local disk storage)
+/uploads/
