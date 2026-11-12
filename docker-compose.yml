@@ -1,4 +1,4 @@
-# Use postgres/example user/password credentials
+# Local Postgres for development. Credentials come from .env (copy .env.example); compose reads it automatically.
 
 services:
 
@@ -9,9 +9,9 @@ services:
     # set shared memory limit when using docker compose
     shm_size: 128mb
     environment:
-      POSTGRES_DB: baker-db
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: ${DB_NAME:-baker-db}
+      POSTGRES_USER: ${DB_USERNAME:?Set DB_USERNAME in .env (copy .env.example)}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env (copy .env.example)}
     ports:
       - "5432:5432"
     volumes:
@@ -20,10 +20,3 @@ services:
 
 volumes:
   postgres_data:
-
-#
-#  adminer:
-#    image: adminer
-#    restart: always
-#    ports:
-#      - 8080:8080

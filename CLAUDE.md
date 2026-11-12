@@ -76,7 +76,7 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
   leftover. Type mismatches and bad request bodies return 500. Unexpected exceptions aren't logged. [#7]
 - Uploaded images are written to `./uploads` but never served. [#8]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
-- DB credentials `admin/admin` are hard-coded. [#5] The Dockerfile is a placeholder and packaging is `war`. [#6]
+- The Dockerfile is a placeholder and packaging is `war`. [#6]
 - Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
 
 ---
@@ -307,9 +307,10 @@ bundled runtime works: `export JAVA_HOME="/c/Program Files/JetBrains/IntelliJ ID
 compiling with `--release 21`).
 
 ```bash
+cp .env.example .env                                  # once; fill in local values (git-ignored)
 docker compose up -d                                  # Postgres (root docker-compose.yml for now)
 ./mvnw clean install                                  # build + test all modules
-./mvnw -pl app spring-boot:run                        # run the app (after install)
+./mvnw -pl app spring-boot:run -Dspring-boot.run.profiles=dev   # run the app (after install)
 ./mvnw -pl app test -Dtest=ModularityTests            # boundary check only, no DB needed
 gh issue list                                         # roadmap work items
 ```
