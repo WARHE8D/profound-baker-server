@@ -1,0 +1,14 @@
+# Keep the build context small and free of secrets and local state.
+**/target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+uploads/
+docs/
+infra/
+notes.md
+challenges.txt
