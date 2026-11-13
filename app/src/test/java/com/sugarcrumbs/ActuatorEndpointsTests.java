@@ -49,15 +49,12 @@ class ActuatorEndpointsTests {
                 .doesNotContain("db");
     }
 
-    // An unmapped path currently answers 500 with a generic ApiError, because the catch-all
-    // handler swallows NoResourceFoundException. #7 maps it to 404; tighten these to 404 then.
-
     @Test
     void actuatorIsNotServedOnTheApplicationPort() throws Exception {
         HttpResponse<String> response = get(appPort, "/actuator/health");
 
-        assertThat(response.statusCode()).isNotEqualTo(200);
-        assertThat(response.body()).doesNotContain("\"status\":\"UP\"");
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(response.body()).contains("\"path\":\"/actuator/health\"").doesNotContain("\"status\":\"UP\"");
     }
 
     @Test
@@ -68,7 +65,7 @@ class ActuatorEndpointsTests {
                 "/actuator/heapdump", "/actuator/loggers", "/actuator/mappings", "/actuator/flyway"}) {
             HttpResponse<String> response = get(managementPort, path);
 
-            assertThat(response.statusCode()).as(path).isNotEqualTo(200);
+            assertThat(response.statusCode()).as(path).isEqualTo(404);
             assertThat(response.body()).as(path)
                     .doesNotContain("propertySources", "\"beans\"", "\"contexts\"", "\"levels\"", "DB_PASSWORD");
         }
