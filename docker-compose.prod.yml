@@ -38,6 +38,9 @@ services:
       APP_STORAGE_PATH: /data/uploads
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:?Set APP_CORS_ALLOWED_ORIGINS in .env}
       APP_JWT_PRIVATE_KEY: ${APP_JWT_PRIVATE_KEY:?Set APP_JWT_PRIVATE_KEY in .env}
+      # Only needed for the first start, which creates the Owner; optional afterwards.
+      APP_OWNER_EMAIL: ${APP_OWNER_EMAIL:-}
+      APP_OWNER_INITIAL_PASSWORD: ${APP_OWNER_INITIAL_PASSWORD:-}
     volumes:
       - uploads:/data/uploads
     # Health check is defined in the Dockerfile (Actuator readiness on the internal port 9080).

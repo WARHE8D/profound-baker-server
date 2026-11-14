@@ -1,5 +1,6 @@
 package com.sugarcrumbs;
 
+import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -9,34 +10,24 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Makes sure the single Owner exists with known credentials, for tests that call owner
- * routes. The test database is shared across classes and the system allows only one
- * Owner, so an existing row is reused (its email and password reset) instead of adding
- * another.
+ * The Owner's credentials for tests that call owner routes. The app creates the Owner on
+ * first start from {@link AbstractIntegrationTest#OWNER_EMAIL}/{@code OWNER_PASSWORD}
+ * (OwnerBootstrap); the database is shared across test classes, so the credentials are
+ * reset in case an earlier test changed them.
  */
 final class OwnerFixture {
 
-    static final String EMAIL = "owner@sugarcrumbs.test";
-    static final String PASSWORD = "correct horse battery staple";
+    static final String EMAIL = AbstractIntegrationTest.OWNER_EMAIL;
+    static final String PASSWORD = AbstractIntegrationTest.OWNER_PASSWORD;
 
     private OwnerFixture() {
     }
 
     /** @return the Owner's id */
     static UUID ensureOwner(JdbcTemplate jdbc, PasswordEncoder passwordEncoder) {
-        String hash = passwordEncoder.encode(PASSWORD);
-        UUID existing = jdbc.query("SELECT id FROM identity.owners LIMIT 1",
-                rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
-        if (existing != null) {
-            jdbc.update("UPDATE identity.owners SET email = ?, password_hash = ? WHERE id = ?", EMAIL, hash, existing);
-            return existing;
-        }
-        UUID id = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO identity.owners
-                    (id, created_at, updated_at, version, business_name, owner_name, email, password_hash)
-                VALUES (?, now(), now(), 0, 'SugarCrumbs', 'Test Owner', ?, ?)
-                """, id, EMAIL, hash);
+        UUID id = jdbc.queryForObject("SELECT id FROM identity.owners", UUID.class);
+        jdbc.update("UPDATE identity.owners SET email = ?, password_hash = ? WHERE id = ?",
+                EMAIL, passwordEncoder.encode(PASSWORD), id);
         return id;
     }
 

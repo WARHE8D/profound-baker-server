@@ -4,6 +4,9 @@ import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.domain.Owner;
 import com.sugarcrumbs.identity.persistence.OwnerRepository;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,20 +14,14 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Resolves "the" owner for this single-tenant system.
+ * Resolves the Owner of this single-tenant system.
  *
- * <p>This is a placeholder for the real thing: once Sprint 1 (Auth)
- * exists, callers should resolve the owner from the authenticated
- * principal (e.g. {@code SecurityContextHolder}), not by scanning the
- * table. Kept here now, ahead of auth, purely so Sprint 3's
- * {@code WorkingHours}/{@code BlockedDate} services have a legitimate
- * {@link Owner} to attach records to — every FK in this system should
- * point at a real row, not a hardcoded placeholder ID.
- *
- * <p>{@link #getTheOwner()} fails loudly rather than silently picking
- * "the first one" if the single-owner invariant is ever violated —
- * see the note on {@link Owner} itself for why that invariant isn't
- * enforced at the DB/entity level.
+ * <p>On an authenticated request the Owner is the token's subject. Public
+ * flows (availability, guest checkout) have no principal, so they fall back to
+ * {@link #getTheOwner()}, which fails loudly rather than silently picking "the
+ * first one" if the single-owner invariant is ever violated (see the note on
+ * {@link Owner} for why that invariant isn't enforced in the database).
+ * {@link OwnerBootstrap} guarantees an Owner exists once the app is up.
  */
 @Service
 @Transactional(readOnly = true)
@@ -36,8 +33,16 @@ public class OwnerService implements OwnerApi {
         this.ownerRepository = ownerRepository;
     }
 
+    /**
+     * The signed-in Owner's id on owner requests; the single Owner otherwise. Callers in
+     * other modules never touch Spring Security, so the principal is read here.
+     */
     @Override
     public UUID currentOwnerId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
+            return UUID.fromString(jwt.getSubject());
+        }
         return getTheOwner().getId();
     }
 
@@ -50,7 +55,7 @@ public class OwnerService implements OwnerApi {
     public Owner getTheOwner() {
         List<Owner> owners = ownerRepository.findAll();
         if (owners.isEmpty()) {
-            throw new IllegalStateException("no Owner has been set up yet — complete onboarding first");
+            throw new IllegalStateException("no Owner has been set up yet");
         }
         if (owners.size() > 1) {
             throw new IllegalStateException(
