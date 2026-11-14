@@ -110,7 +110,10 @@ public class AvailabilityService {
         LocalTime cursor = hours.getStartTime();
         while (true) {
             LocalTime slotEnd = cursor.plusMinutes(hours.getSlotDurationMinutes());
-            if (slotEnd.isAfter(hours.getEndTime())) {
+            // LocalTime wraps at midnight, so a slot running past it "ends" before it starts (23:30 + 45 min = 00:15).
+            // It can't fit a window that ends the same day, and comparing 00:15 against the window end alone would
+            // accept it and then keep generating slots forever.
+            if (!slotEnd.isAfter(cursor) || slotEnd.isAfter(hours.getEndTime())) {
                 break;
             }
             int capacity = hours.getMaxConcurrentBookings();
@@ -118,10 +121,6 @@ public class AvailabilityService {
             int remaining = Math.max(0, capacity - booked);
             slots.add(new TimeSlotResponse(cursor, slotEnd, capacity, remaining, remaining > 0));
             cursor = slotEnd;
-            if (cursor.equals(LocalTime.MIDNIGHT)) {
-                // plusMinutes wrapped past midnight (a working window ending exactly at end-of-day) — stop instead of looping forever.
-                break;
-            }
         }
         return slots;
     }

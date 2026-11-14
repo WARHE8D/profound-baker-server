@@ -1,0 +1,44 @@
+# Builds every module and runs the full test suite (unit, Spring Modulith boundaries, and
+# Testcontainers integration tests against Postgres) on every push and pull request.
+# Must pass before merging.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch or PR supersedes the running build.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: ./mvnw verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # The hosted runner has Docker, which Testcontainers uses for the throwaway Postgres.
+      - name: Build and test
+        run: ./mvnw -B -ntp verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: '**/target/surefire-reports/'
+          retention-days: 7

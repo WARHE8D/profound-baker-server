@@ -1,10 +1,10 @@
 package com.sugarcrumbs;
 
+import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 
 import java.io.IOException;
 import java.net.URI;
@@ -21,8 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "management.server.port=0")
-@Import(TestcontainersConfiguration.class)
-class ActuatorEndpointsTests {
+class ActuatorEndpointsTests extends AbstractIntegrationTest {
 
     private final HttpClient http = HttpClient.newHttpClient();
 

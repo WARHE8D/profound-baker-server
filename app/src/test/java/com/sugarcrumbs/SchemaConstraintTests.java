@@ -1,10 +1,9 @@
 package com.sugarcrumbs;
 
+import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,10 +19,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * that each violation surfaces under its named constraint (so error handling
  * and logs can tell them apart). Each test rolls back.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
 @Transactional
-class SchemaConstraintTests {
+class SchemaConstraintTests extends AbstractIntegrationTest {
 
     @Autowired
     JdbcTemplate jdbc;
