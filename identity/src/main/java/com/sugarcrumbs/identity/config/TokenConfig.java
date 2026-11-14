@@ -25,7 +25,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
  * {@code GET /.well-known/jwks.json} instead.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, OwnerBootstrapProperties.class})
 public class TokenConfig {
 
     private static final Logger log = LoggerFactory.getLogger(TokenConfig.class);

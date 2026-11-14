@@ -25,6 +25,10 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 public abstract class AbstractIntegrationTest {
 
     /** Public for tests that boot the app by hand ({@code SpringApplicationBuilder}) rather than through a test context. */
+    /** The Owner the app creates on first start (OwnerBootstrap) in the shared test database. */
+    public static final String OWNER_EMAIL = "owner@sugarcrumbs.test";
+    public static final String OWNER_PASSWORD = "correct horse battery staple";
+
     public static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
 
     static {
@@ -36,5 +40,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("app.owner.email", () -> OWNER_EMAIL);
+        registry.add("app.owner.initial-password", () -> OWNER_PASSWORD);
     }
 }

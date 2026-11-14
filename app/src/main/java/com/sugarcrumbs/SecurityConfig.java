@@ -1,6 +1,7 @@
 package com.sugarcrumbs;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -30,6 +31,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code ApiError} body as every other error ({@code GlobalExceptionHandler}).
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class SecurityConfig {
 
     @Bean
