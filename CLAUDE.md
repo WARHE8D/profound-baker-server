@@ -67,8 +67,9 @@ A **modular monolith** (Spring Boot 4.1.1, Java 21, Spring Modulith 2.1) split i
 and springdoc. The `app` module is packaged as an executable jar, `app/target/baker.jar`. See §3 for the module rules.
 
 Known problems (see the PLAN.md §2 table; the issue that fixes each one is in brackets):
-- **Spring Security is commented out** in `pom.xml`. Every endpoint is public, and `GET /api/bookings` leaks
-  guests' contact details. [#10, #13]
+- Owner routes require a JWT (#10, `app`'s `SecurityConfig`), but the public surface still lives at the old
+  paths (`GET /api/items`, `/api/categories`, `/api/availability`, `POST /api/bookings`) with no CORS or rate
+  limits yet. [#13]
 - No way to create the Owner, so availability and booking fail until a row is inserted by hand. [#11]
 - **Overbooking race:** capacity is checked, then the booking is inserted, with no lock in between. [#15]
 - Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also

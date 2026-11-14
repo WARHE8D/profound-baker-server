@@ -8,7 +8,13 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,6 +26,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ProfileStartupTests {
 
+    /** A real signing key in the one-line format .env.example documents (base64 PKCS#8 DER). */
+    static final String JWT_KEY = newJwtKey();
+
+    static String newJwtKey() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return Base64.getEncoder().encodeToString(generator.generateKeyPair().getPrivate().getEncoded());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     @Nested
     @SpringBootTest(properties = {
             "APP_STORAGE_PATH=target/test-uploads",
@@ -27,6 +46,12 @@ class ProfileStartupTests {
     })
     @ActiveProfiles("prod")
     class Prod extends AbstractIntegrationTest {
+
+        // Not in @SpringBootTest(properties): the key is generated, not a constant.
+        @DynamicPropertySource
+        static void jwtKey(DynamicPropertyRegistry registry) {
+            registry.add("APP_JWT_PRIVATE_KEY", () -> JWT_KEY);
+        }
 
         @Value("${spring.jpa.show-sql}")
         boolean showSql;
@@ -73,7 +98,8 @@ class ProfileStartupTests {
             assertThatThrownBy(() -> startProd(
                     "DB_URL=" + postgres.getJdbcUrl(),
                     "DB_USERNAME=" + postgres.getUsername(),
-                    "DB_PASSWORD=" + postgres.getPassword()))
+                    "DB_PASSWORD=" + postgres.getPassword(),
+                    "APP_JWT_PRIVATE_KEY=" + JWT_KEY))
                     .hasStackTraceContaining("APP_STORAGE_PATH");
         }
 
@@ -82,8 +108,31 @@ class ProfileStartupTests {
             assertThatThrownBy(() -> startProd(
                     "DB_USERNAME=" + postgres.getUsername(),
                     "DB_PASSWORD=" + postgres.getPassword(),
-                    "APP_STORAGE_PATH=target/test-uploads"))
+                    "APP_STORAGE_PATH=target/test-uploads",
+                    "APP_JWT_PRIVATE_KEY=" + JWT_KEY))
                     .hasStackTraceContaining("DB_URL");
+        }
+
+        /** Prod must never fall back to a throwaway key, which would sign the Owner out on every restart. */
+        @Test
+        void refusesToStartWithoutJwtSigningKey() {
+            assertThatThrownBy(() -> startProd(
+                    "DB_URL=" + postgres.getJdbcUrl(),
+                    "DB_USERNAME=" + postgres.getUsername(),
+                    "DB_PASSWORD=" + postgres.getPassword(),
+                    "APP_STORAGE_PATH=target/test-uploads"))
+                    .hasStackTraceContaining("APP_JWT_PRIVATE_KEY");
+        }
+
+        @Test
+        void refusesToStartWithAnInvalidJwtSigningKey() {
+            assertThatThrownBy(() -> startProd(
+                    "DB_URL=" + postgres.getJdbcUrl(),
+                    "DB_USERNAME=" + postgres.getUsername(),
+                    "DB_PASSWORD=" + postgres.getPassword(),
+                    "APP_STORAGE_PATH=target/test-uploads",
+                    "APP_JWT_PRIVATE_KEY=not-a-key"))
+                    .hasStackTraceContaining("not a valid PKCS#8 RSA private key");
         }
 
         private static void startProd(String... properties) {

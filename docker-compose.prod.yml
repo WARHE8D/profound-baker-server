@@ -37,6 +37,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       APP_STORAGE_PATH: /data/uploads
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:?Set APP_CORS_ALLOWED_ORIGINS in .env}
+      APP_JWT_PRIVATE_KEY: ${APP_JWT_PRIVATE_KEY:?Set APP_JWT_PRIVATE_KEY in .env}
     volumes:
       - uploads:/data/uploads
     # Health check is defined in the Dockerfile (Actuator readiness on the internal port 9080).

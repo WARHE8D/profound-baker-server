@@ -13,6 +13,9 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -39,6 +42,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -158,6 +162,27 @@ class GlobalExceptionHandlerTests {
                 415, "Unsupported Media Type", "/test/body");
     }
 
+    // ---- security exceptions ----
+
+    @Test
+    void badCredentialsAre401WithTheirMessageAndABearerChallenge() throws Exception {
+        expectApiError(mvc.perform(get("/test/bad-credentials")), 401, "Unauthorized", "/test/bad-credentials")
+                .andExpect(jsonPath("$.message").value("invalid email or password"))
+                .andExpect(header().string("WWW-Authenticate", "Bearer"));
+    }
+
+    @Test
+    void otherAuthenticationFailuresAre401WithAGenericMessage() throws Exception {
+        expectApiError(mvc.perform(get("/test/unauthenticated")), 401, "Unauthorized", "/test/unauthenticated")
+                .andExpect(jsonPath("$.message").value("a valid access token is required"))
+                .andExpect(content().string(not(containsString("Jwt expired"))));
+    }
+
+    @Test
+    void accessDeniedIs403() throws Exception {
+        expectApiError(mvc.perform(get("/test/forbidden")), 403, "Forbidden", "/test/forbidden");
+    }
+
     // ---- unexpected exceptions ----
 
     @Test
@@ -213,6 +238,21 @@ class GlobalExceptionHandlerTests {
 
     @RestController
     static class FailingController {
+
+        @GetMapping("/test/bad-credentials")
+        void badCredentials() {
+            throw new BadCredentialsException("invalid email or password");
+        }
+
+        @GetMapping("/test/unauthenticated")
+        void unauthenticated() {
+            throw new InsufficientAuthenticationException("Jwt expired at 2026-01-01T00:00:00Z");
+        }
+
+        @GetMapping("/test/forbidden")
+        void forbidden() {
+            throw new AccessDeniedException("Access Denied");
+        }
 
         @GetMapping("/test/not-found")
         void notFound() {
