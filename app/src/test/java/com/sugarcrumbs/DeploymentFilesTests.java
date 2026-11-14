@@ -72,11 +72,18 @@ class DeploymentFilesTests {
 
     @Test
     void caddyProxiesTheApiPortButNeverActuator() throws IOException {
-        String directives = Files.readAllLines(REPO_ROOT.resolve("infra/caddy/Caddyfile")).stream()
-                .filter(line -> !line.strip().startsWith("#"))
-                .collect(Collectors.joining("\n"));
+        assertThat(caddyDirectives()).contains("reverse_proxy app:8080").doesNotContain("9080");
+    }
 
-        assertThat(directives).contains("reverse_proxy app:8080").doesNotContain("9080");
+    @Test
+    @SuppressWarnings("unchecked")
+    void caddyServesTheUploadsVolumeReadOnly() throws IOException {
+        Map<String, Object> caddy = services("docker-compose.prod.yml").get("caddy");
+        assertThat((List<Object>) caddy.get("volumes")).contains("uploads:/srv/uploads:ro");
+
+        assertThat(caddyDirectives())
+                .containsPattern("handle_path /uploads/\\*\\s*\\{[^}]*root \\* /srv/uploads[^}]*file_server\\s")
+                .doesNotContain("browse");
     }
 
     @Test
@@ -92,6 +99,13 @@ class DeploymentFilesTests {
                     assertThat(envExample).as("%s from %s in .env.example", name, file)
                             .containsPattern("(?m)^#?\\s*" + name + "="));
         }
+    }
+
+    /** The Caddyfile without its comment lines, so prose never satisfies or breaks a check. */
+    private static String caddyDirectives() throws IOException {
+        return Files.readAllLines(REPO_ROOT.resolve("infra/caddy/Caddyfile")).stream()
+                .filter(line -> !line.strip().startsWith("#"))
+                .collect(Collectors.joining("\n"));
     }
 
     @SuppressWarnings("unchecked")

@@ -1,7 +1,8 @@
 # Public entry point. Caddy obtains and renews the TLS certificate for APP_DOMAIN automatically
 # (use APP_DOMAIN=localhost to try it locally with Caddy's internal CA).
 #
-# Only the API port is proxied. Actuator (port 9080) is never routed, so it stays internal.
+# Uploaded images are served straight from the uploads volume (mounted read-only); everything else goes
+# to the API port. Actuator (port 9080) is never routed, so it stays internal.
 
 {$APP_DOMAIN} {
 	encode zstd gzip
@@ -13,5 +14,17 @@
 		-Server
 	}
 
-	reverse_proxy app:8080
+	# handle_path strips /uploads, so /uploads/items/x.png maps to /srv/uploads/items/x.png. No "browse",
+	# so directories are never listed. Filenames are random UUIDs that are never rewritten: cache forever.
+	# The CSP stops a file from running script even if it is opened directly.
+	handle_path /uploads/* {
+		root * /srv/uploads
+		header Cache-Control "public, max-age=31536000, immutable"
+		header Content-Security-Policy "default-src 'none'; sandbox"
+		file_server
+	}
+
+	handle {
+		reverse_proxy app:8080
+	}
 }

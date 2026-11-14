@@ -201,8 +201,9 @@ public class Item extends BaseEntity {
         this.imageUrls.add(url);
     }
 
-    public void removeImage(String url) {
-        this.imageUrls.remove(url);
+    /** @return whether the item held this image, so callers know if there is anything to clean up */
+    public boolean removeImage(String url) {
+        return this.imageUrls.remove(url);
     }
 
     /** Whether this item can currently be ordered/booked. */

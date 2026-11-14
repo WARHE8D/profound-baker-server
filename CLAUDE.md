@@ -52,6 +52,8 @@ The system is **single-tenant**: there is exactly one Owner. Don't add multi-ten
 - Stale-pending auto-cancel job (`config/StaleBookingCleanupJob.java`, `app.booking.pending-hold-hours`).
 - Item stock tracking (`stockQuantity == null` means not tracked). Decremented on order, released on cancel.
 - Image upload behind the `ImageStorageService` interface, with a content-type allowlist and sanitized paths.
+  Files are served at `/uploads/**` (Caddy from the read-only volume in prod, `UploadsResourceConfig` in the
+  app otherwise) and deleted from disk after commit when removed from an item or when the item is deleted.
 - `Invoice` entity (modeled, no API yet; see #20 and #21). `Owner` entity with `passwordHash` + `Address`.
 - `BaseEntity`: UUID ids, audit timestamps, `@Version` optimistic locking, correct JPA equals/hashCode.
 - Uniform `ApiError` body via `GlobalExceptionHandler`.
@@ -72,7 +74,6 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
 - Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also
   uses `toHours()`, which rounds down. [#15]
 - No price snapshot, so repricing an item rewrites historical orders. [#14]
-- Uploaded images are written to `./uploads` but never served. [#8]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
 - Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
 
