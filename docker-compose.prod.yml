@@ -55,6 +55,8 @@ services:
       - "443:443/udp"
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Caddy serves uploaded images itself; read-only, only the app writes to this volume.
+      - uploads:/srv/uploads:ro
       - caddy_data:/data
       - caddy_config:/config
 

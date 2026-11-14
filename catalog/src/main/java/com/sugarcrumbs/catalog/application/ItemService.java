@@ -13,9 +13,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -114,17 +117,31 @@ public class ItemService {
         return item;
     }
 
-    /** Uploads the file to storage, then attaches the resulting URL to the item — one transaction, one API call for the owner. */
+    /**
+     * Uploads the file to storage, then attaches the resulting URL to the
+     * item — one transaction, one API call for the owner. If the
+     * transaction rolls back, the file is deleted again so it isn't left
+     * orphaned on disk.
+     */
     public Item uploadImage(UUID id, MultipartFile file) {
         Item item = getOrThrow(id);
         String url = imageStorageService.store(file, IMAGE_SUBFOLDER);
+        afterCompletion(false, () -> imageStorageService.delete(url));
         item.addImage(url);
         return item;
     }
 
+    /**
+     * Detaches the image and deletes its file once the change is
+     * committed. Only a URL the item actually held is deleted, so this
+     * endpoint can't be used to remove arbitrary files, and a file another
+     * item still shows is kept.
+     */
     public Item removeImageUrl(UUID id, String url) {
         Item item = getOrThrow(id);
-        item.removeImage(url);
+        if (item.removeImage(url)) {
+            deleteUnreferencedFilesAfterCommit(List.of(url));
+        }
         return item;
     }
 
@@ -144,6 +161,42 @@ public class ItemService {
             throw new ConflictException(
                     "cannot delete item '" + item.getName() + "': it has booking history. Mark it unavailable instead.");
         }
+        List<String> imageUrls = List.copyOf(item.getImageUrls());
         itemRepository.delete(item);
+        deleteUnreferencedFilesAfterCommit(imageUrls);
+    }
+
+    /**
+     * Files are deleted only after commit: deleting them inside the
+     * transaction would leave items pointing at missing files if it then
+     * rolled back. The reference check runs now, while the query still
+     * sees this transaction's own changes.
+     */
+    private void deleteUnreferencedFilesAfterCommit(Collection<String> urls) {
+        List<String> unreferenced = urls.stream()
+                .distinct()
+                .filter(url -> !itemRepository.existsByImageUrl(url))
+                .toList();
+        if (!unreferenced.isEmpty()) {
+            afterCompletion(true, () -> unreferenced.forEach(imageStorageService::delete));
+        }
+    }
+
+    /** Runs the action after this transaction commits (or rolls back), or right away if no transaction is active. */
+    private static void afterCompletion(boolean onCommit, Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            if (onCommit) {
+                action.run();
+            }
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == (onCommit ? STATUS_COMMITTED : STATUS_ROLLED_BACK)) {
+                    action.run();
+                }
+            }
+        });
     }
 }
