@@ -44,6 +44,9 @@ class SecurityConfig {
         http
                 // No cookies or sessions: credentials travel only in the Authorization header,
                 // which a cross-site form cannot set, so CSRF protection has nothing to protect.
+                // StatelessAuthGuardTests fails the build if cookie/session/Basic/form auth is ever
+                // added; re-enable CSRF before doing that. (CodeQL java/spring-disabled-csrf-protection
+                // is dismissed for this line on that basis.)
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(AbstractHttpConfigurer::disable)
