@@ -4,6 +4,7 @@ import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ByteArrayResource;
@@ -11,6 +12,8 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.util.LinkedMultiValueMap;
@@ -46,14 +49,25 @@ class UploadsServingTests extends AbstractIntegrationTest {
     @LocalServerPort
     int port;
 
+    @Autowired
+    JdbcTemplate jdbc;
+
+    @Autowired
+    PasswordEncoder passwordEncoder;
+
     private RestClient http;
 
     @BeforeEach
     void setUp() {
+        OwnerFixture.ensureOwner(jdbc, passwordEncoder);
         // Never throw on 4xx/5xx: the tests assert on the status themselves.
-        http = RestClient.builder()
+        RestClient anonymous = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .defaultStatusHandler(status -> true, (request, response) -> { })
+                .build();
+        // Managing items is owner-only; fetching the image files stays public.
+        http = anonymous.mutate()
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + OwnerFixture.accessToken(anonymous))
                 .build();
     }
 

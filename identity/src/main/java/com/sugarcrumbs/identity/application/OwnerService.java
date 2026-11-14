@@ -1,5 +1,6 @@
 package com.sugarcrumbs.identity.application;
 
+import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.domain.Owner;
 import com.sugarcrumbs.identity.persistence.OwnerRepository;
@@ -38,6 +39,12 @@ public class OwnerService implements OwnerApi {
     @Override
     public UUID currentOwnerId() {
         return getTheOwner().getId();
+    }
+
+    /** The Owner a token was issued to. 404 if it no longer exists. */
+    public Owner getOwner(UUID ownerId) {
+        return ownerRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("owner not found"));
     }
 
     public Owner getTheOwner() {

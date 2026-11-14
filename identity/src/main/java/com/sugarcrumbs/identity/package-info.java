@@ -1,5 +1,5 @@
 /**
- * Identity module: the bakery's single Owner (and, from #10, authentication).
+ * Identity module: the bakery's single Owner and its authentication (login, JWTs, refresh tokens).
  * Future {@code auth-service}.
  *
  * <p>Published API: {@link com.sugarcrumbs.identity.OwnerApi}. Every sub-package is internal.
