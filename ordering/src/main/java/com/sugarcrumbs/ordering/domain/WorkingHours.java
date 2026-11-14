@@ -32,6 +32,9 @@ import java.util.UUID;
 )
 public class WorkingHours extends BaseEntity {
 
+    /** Same floor as the database check and {@code WorkingHoursRequest}; shorter slots aren't meaningful for pickups. */
+    public static final int MIN_SLOT_DURATION_MINUTES = 5;
+
     @NotNull
     /** The Owner's id. A plain UUID, not a relation: the Owner lives in the identity module (see {@code OwnerApi}). */
     @Column(name = "owner_id", nullable = false)
@@ -51,7 +54,7 @@ public class WorkingHours extends BaseEntity {
     private LocalTime endTime;
 
     /** Granularity used when generating bookable slots from this window. */
-    @Min(5)
+    @Min(MIN_SLOT_DURATION_MINUTES)
     @Column(name = "slot_duration_minutes", nullable = false)
     private int slotDurationMinutes;
 
@@ -67,7 +70,7 @@ public class WorkingHours extends BaseEntity {
     private WorkingHours(Builder builder) {
         this.ownerId = Objects.requireNonNull(builder.ownerId, "ownerId is required");
         this.dayOfWeek = Objects.requireNonNull(builder.dayOfWeek, "dayOfWeek is required");
-        this.slotDurationMinutes = requirePositive(builder.slotDurationMinutes, "slotDurationMinutes");
+        this.slotDurationMinutes = requireSlotDuration(builder.slotDurationMinutes);
         this.maxConcurrentBookings = requirePositive(builder.maxConcurrentBookings, "maxConcurrentBookings");
         setWindow(builder.startTime, builder.endTime);
     }
@@ -83,7 +86,7 @@ public class WorkingHours extends BaseEntity {
     }
 
     public void changeSlotDuration(int minutes) {
-        this.slotDurationMinutes = requirePositive(minutes, "slotDurationMinutes");
+        this.slotDurationMinutes = requireSlotDuration(minutes);
     }
 
     public void changeCapacity(int maxConcurrentBookings) {
@@ -103,6 +106,13 @@ public class WorkingHours extends BaseEntity {
         }
         this.startTime = start;
         this.endTime = end;
+    }
+
+    private static int requireSlotDuration(int minutes) {
+        if (minutes < MIN_SLOT_DURATION_MINUTES) {
+            throw new IllegalArgumentException("slotDurationMinutes must be at least " + MIN_SLOT_DURATION_MINUTES);
+        }
+        return minutes;
     }
 
     private static int requirePositive(int value, String field) {

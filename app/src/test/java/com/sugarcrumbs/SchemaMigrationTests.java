@@ -1,10 +1,9 @@
 package com.sugarcrumbs;
 
+import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -17,9 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code ddl-auto=validate} accepts the result. Validation runs while the context
  * starts, so a mapping/migration mismatch fails the context and this test with it.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
-class SchemaMigrationTests {
+class SchemaMigrationTests extends AbstractIntegrationTest {
 
     @Autowired
     Map<String, Flyway> flyways;

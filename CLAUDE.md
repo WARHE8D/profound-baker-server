@@ -75,7 +75,6 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
   uses `toHours()`, which rounds down. [#15]
 - No price snapshot, so repricing an item rewrites historical orders. [#14]
 - `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
-- Only `contextLoads`, `ModularityTests` and `SchemaMigrationTests` exist. CI runs only CodeQL. [#9]
 
 ---
 
@@ -298,9 +297,14 @@ distributed locking, which is more complexity than a single baker needs.
 - Contract tests for `CatalogApi` and `OwnerApi` behaviour, so the future HTTP implementations can be checked
   against the same suite.
 - GitHub Actions runs `./mvnw -B verify` on every push and PR. It must pass before merging.
-- Spring context tests `@Import(TestcontainersConfiguration.class)` (in `app` until the shared test-jar lands in
-  #9). They need Docker running, not a local database. `SchemaMigrationTests` checks that migrations apply,
-  that Hibernate validation passes, and that no FK crosses module schemas.
+- Spring context tests extend `com.sugarcrumbs.common.test.AbstractIntegrationTest` (from the `baker-common`
+  test-jar; add it as a `test-jar` test dependency). It starts **one** Postgres container per test JVM, shared by
+  every context, so the database is shared across test classes: tests create their own data and never assume
+  empty tables. Redeclare `@SpringBootTest` on the subclass to change its attributes. They need Docker running,
+  not a local database. `SchemaMigrationTests` checks that migrations apply, that Hibernate validation passes,
+  and that no FK crosses module schemas.
+- A test guarding against a hang uses `@Timeout(threadMode = SEPARATE_THREAD)`: a same-thread timeout only
+  interrupts, so a loop that never checks for interrupts hangs the build instead of failing.
 
 ## 9. Commands
 

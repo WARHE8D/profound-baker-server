@@ -132,11 +132,11 @@ public class Item extends BaseEntity {
     private Item(Builder builder) {
         this.name = requireNonBlank(builder.name, "name");
         this.description = builder.description;
-        this.price = normalizePrice(Objects.requireNonNull(builder.price, "price is required"));
+        this.price = requirePositivePrice(builder.price);
         this.category = Objects.requireNonNull(builder.category, "category is required");
         this.available = builder.available;
         this.leadTimeHours = requireNonNegative(builder.leadTimeHours, "leadTimeHours");
-        this.stockQuantity = builder.stockQuantity;
+        this.stockQuantity = requireNonNegativeStock(builder.stockQuantity);
         if (builder.imageUrls != null) {
             this.imageUrls = new ArrayList<>(builder.imageUrls);
         }
@@ -153,10 +153,7 @@ public class Item extends BaseEntity {
     }
 
     public void reprice(BigDecimal newPrice) {
-        if (newPrice == null || newPrice.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("price must be greater than zero");
-        }
-        this.price = normalizePrice(newPrice);
+        this.price = requirePositivePrice(newPrice);
     }
 
     public void moveToCategory(Category newCategory) {
@@ -211,8 +208,20 @@ public class Item extends BaseEntity {
         return available && (stockQuantity == null || stockQuantity > 0);
     }
 
-    private static BigDecimal normalizePrice(BigDecimal price) {
-        return price.setScale(PRICE_SCALE, RoundingMode.HALF_UP);
+    /**
+     * Rounds to cents first and checks afterwards, so 0.001 (which would be
+     * stored as 0.00) is rejected like 0 rather than tripping the database's
+     * {@code price > 0} check.
+     */
+    private static BigDecimal requirePositivePrice(BigDecimal price) {
+        if (price == null) {
+            throw new IllegalArgumentException("price is required");
+        }
+        BigDecimal rounded = price.setScale(PRICE_SCALE, RoundingMode.HALF_UP);
+        if (rounded.signum() <= 0) {
+            throw new IllegalArgumentException("price must be greater than zero");
+        }
+        return rounded;
     }
 
     private static String requireNonBlank(String value, String field) {
@@ -241,10 +250,14 @@ public class Item extends BaseEntity {
      * trusts the caller.
      */
     public void updateStockQuantity(Integer newStockQuantity) {
-        if (newStockQuantity != null && newStockQuantity < 0) {
+        this.stockQuantity = requireNonNegativeStock(newStockQuantity);
+    }
+
+    private static Integer requireNonNegativeStock(Integer stockQuantity) {
+        if (stockQuantity != null && stockQuantity < 0) {
             throw new IllegalArgumentException("stockQuantity cannot be negative");
         }
-        this.stockQuantity = newStockQuantity;
+        return stockQuantity;
     }
 
     // ---- Getters only; no public setters — see class javadoc ----

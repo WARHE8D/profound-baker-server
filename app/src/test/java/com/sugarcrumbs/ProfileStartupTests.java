@@ -1,14 +1,12 @@
 package com.sugarcrumbs;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -27,9 +25,8 @@ class ProfileStartupTests {
             "APP_STORAGE_PATH=target/test-uploads",
             "APP_CORS_ALLOWED_ORIGINS=https://shop.example"
     })
-    @Import(TestcontainersConfiguration.class)
     @ActiveProfiles("prod")
-    class Prod {
+    class Prod extends AbstractIntegrationTest {
 
         @Value("${spring.jpa.show-sql}")
         boolean showSql;
@@ -49,10 +46,8 @@ class ProfileStartupTests {
     }
 
     @Nested
-    @SpringBootTest
-    @Import(TestcontainersConfiguration.class)
     @ActiveProfiles("dev")
-    class Dev {
+    class Dev extends AbstractIntegrationTest {
 
         @Value("${spring.jpa.show-sql}")
         boolean showSql;
@@ -67,20 +62,11 @@ class ProfileStartupTests {
         }
     }
 
+    /** Boots the app by hand, outside the test context, against the shared test database. */
     @Nested
     class ProdWithMissingVariables {
 
-        static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
-
-        @BeforeAll
-        static void startDatabase() {
-            postgres.start();
-        }
-
-        @AfterAll
-        static void stopDatabase() {
-            postgres.stop();
-        }
+        static final PostgreSQLContainer postgres = AbstractIntegrationTest.POSTGRES;
 
         @Test
         void refusesToStartWithoutStoragePath() {
