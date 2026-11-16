@@ -134,10 +134,10 @@ public class AvailabilityService {
         Instant slotEndInstant = date.atTime(slotEnd).atZone(zone).toInstant();
 
         if (excludeOrderId == null) {
-            return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
-                    slotStartInstant, slotEndInstant, OrderStatus.CANCELLED);
+            return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(
+                    slotStartInstant, slotEndInstant, OrderStatus.WITHDRAWN);
         }
-        return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotAndIdNot(
-                slotStartInstant, slotEndInstant, OrderStatus.CANCELLED, excludeOrderId);
+        return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotInAndIdNot(
+                slotStartInstant, slotEndInstant, OrderStatus.WITHDRAWN, excludeOrderId);
     }
 }

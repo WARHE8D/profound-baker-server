@@ -17,6 +17,7 @@ public record OrderResponse(
         GuestContactResponse guestContact,
         String notes,
         String cancellationReason,
+        String rejectionReason,
         Instant createdAt,
         Instant updatedAt
 ) {

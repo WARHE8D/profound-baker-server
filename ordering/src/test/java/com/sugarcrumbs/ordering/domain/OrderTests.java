@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -22,9 +23,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <pre>
  * PENDING → CONFIRMED → IN_PROGRESS → FULFILLED
- *              └──────────────────────↗
+ *    │          └──────────────────────↗
+ *    └→ REJECTED
  * PENDING / CONFIRMED / IN_PROGRESS → CANCELLED
  * </pre>
+ *
+ * Lines and notes can be edited only while the order is pending (#16).
  */
 class OrderTests {
 
@@ -52,6 +56,7 @@ class OrderTests {
                 order.confirm();
                 order.fulfill();
             }
+            case REJECTED -> order.reject("fully booked");
             case CANCELLED -> order.cancel("changed plans");
         }
         assertThat(order.getStatus()).isEqualTo(status);
@@ -198,6 +203,17 @@ class OrderTests {
             assertThat(order.getCancellationReason()).isEqualTo("oven broke");
         }
 
+        @Test
+        void aPendingOrderCanBeRejectedWithAReason() {
+            Order order = valid().build();
+
+            order.reject("  fully booked that week ");
+
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.REJECTED);
+            assertThat(order.getRejectionReason()).isEqualTo("fully booked that week");
+            assertThat(order.getCancellationReason()).isNull();
+        }
+
         @ParameterizedTest
         @EnumSource(value = OrderStatus.class, names = {"PENDING", "CONFIRMED", "IN_PROGRESS"})
         void openOrdersCanBeRescheduled(OrderStatus from) {
@@ -227,19 +243,36 @@ class OrderTests {
         }
 
         @ParameterizedTest
-        @EnumSource(value = OrderStatus.class, names = {"PENDING", "FULFILLED", "CANCELLED"})
+        @EnumSource(value = OrderStatus.class, names = {"PENDING", "FULFILLED", "REJECTED", "CANCELLED"})
         void fulfilRequiresAConfirmedOrInProgressOrder(OrderStatus from) {
             assertRefused(from, Order::fulfill);
         }
 
+        /** Once confirmed, calling an order off is a cancellation, never a rejection. */
         @ParameterizedTest
-        @EnumSource(value = OrderStatus.class, names = {"FULFILLED", "CANCELLED"})
+        @EnumSource(value = OrderStatus.class, names = "PENDING", mode = EnumSource.Mode.EXCLUDE)
+        void onlyAPendingOrderCanBeRejected(OrderStatus from) {
+            assertRefused(from, order -> order.reject("no"));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "   "})
+        void aRejectionNeedsAReason(String reason) {
+            Order order = valid().build();
+
+            assertThatIllegalArgumentException().isThrownBy(() -> order.reject(reason));
+            assertThatIllegalArgumentException().isThrownBy(() -> order.reject(null));
+            assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = OrderStatus.class, names = {"FULFILLED", "REJECTED", "CANCELLED"})
         void finishedOrdersCannotBeCancelled(OrderStatus from) {
             assertRefused(from, order -> order.cancel("too late"));
         }
 
         @ParameterizedTest
-        @EnumSource(value = OrderStatus.class, names = {"FULFILLED", "CANCELLED"})
+        @EnumSource(value = OrderStatus.class, names = {"FULFILLED", "REJECTED", "CANCELLED"})
         void finishedOrdersCannotBeRescheduled(OrderStatus from) {
             Order order = inStatus(from);
 
@@ -266,9 +299,74 @@ class OrderTests {
     @Nested
     class Edits {
 
+        private final UUID bread = UUID.randomUUID();
+        private final UUID cake = UUID.randomUUID();
+        private final UUID roll = UUID.randomUUID();
+
+        private Order breadAndCake() {
+            return Order.builder().reference("SC-7F3K2").pickupAt(PICKUP)
+                    .guestContact(new GuestContact("Ada", "a@b.c", "1"))
+                    .line(bread, "Sourdough", new BigDecimal("6.50"), 2)
+                    .line(cake, "Lemon cake", new BigDecimal("24.99"), 1)
+                    .build();
+        }
+
         @Test
         void rescheduleRequiresATime() {
             assertThatThrownBy(() -> valid().build().reschedule(null)).isInstanceOf(NullPointerException.class);
+        }
+
+        /** The guest's agreed price survives even if the edit carries a different one. */
+        @Test
+        void keptLinesChangeOnlyTheirQuantityNewOnesGoAtTheEndRemovedOnesGo() {
+            Order order = breadAndCake();
+
+            order.editLines(List.of(
+                    new Order.LineDraft(roll, "Cinnamon roll", new BigDecimal("3.00"), 4),
+                    new Order.LineDraft(bread, "Renamed", new BigDecimal("99.00"), 3)));
+
+            assertThat(order.getLines()).extracting(OrderLine::getItemId).containsExactly(bread, roll);
+            OrderLine kept = order.getLines().getFirst();
+            assertThat(kept.getLineNo()).isEqualTo(1);
+            assertThat(kept.getItemName()).isEqualTo("Sourdough");
+            assertThat(kept.getUnitPrice()).isEqualByComparingTo("6.50");
+            assertThat(kept.getQuantity()).isEqualTo(3);
+            assertThat(kept.getLineTotal()).isEqualByComparingTo("19.50");
+            assertThat(order.getLines().get(1).getLineNo()).as("after every old line, removed ones included")
+                    .isEqualTo(3);
+            assertThat(order.getSubtotal()).isEqualByComparingTo("31.50");
+        }
+
+        @Test
+        void anEditMustLeaveAtLeastOneLineAndEachItemOnce() {
+            Order order = breadAndCake();
+
+            assertThatIllegalArgumentException().isThrownBy(() -> order.editLines(List.of()));
+            assertThatIllegalArgumentException().isThrownBy(() -> order.editLines(List.of(
+                    new Order.LineDraft(roll, "Roll", BigDecimal.ONE, 1),
+                    new Order.LineDraft(roll, "Roll", BigDecimal.ONE, 2))));
+            assertThat(order.getLines()).extracting(OrderLine::getQuantity).containsExactly(2, 1);
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = OrderStatus.class, names = "PENDING", mode = EnumSource.Mode.EXCLUDE)
+        void onlyAPendingOrdersLinesAndNotesCanBeEdited(OrderStatus from) {
+            Order order = inStatus(from);
+            List<Order.LineDraft> edit = List.of(new Order.LineDraft(roll, "Roll", BigDecimal.ONE, 1));
+
+            assertThatIllegalStateException().isThrownBy(() -> order.editLines(edit));
+            assertThatIllegalStateException().isThrownBy(() -> order.updateNotes("extra candles"));
+            assertThat(order.getLines()).hasSize(1);
+            assertThat(order.getNotes()).isNull();
+        }
+
+        @Test
+        void aPendingOrdersNotesCanBeChanged() {
+            Order order = valid().build();
+
+            order.updateNotes("Happy birthday, Sam");
+
+            assertThat(order.getNotes()).isEqualTo("Happy birthday, Sam");
         }
     }
 }

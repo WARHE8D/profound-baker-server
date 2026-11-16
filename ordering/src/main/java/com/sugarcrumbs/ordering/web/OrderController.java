@@ -3,7 +3,10 @@ package com.sugarcrumbs.ordering.web;
 import com.sugarcrumbs.ordering.application.OrderService;
 import com.sugarcrumbs.ordering.domain.OrderStatus;
 import com.sugarcrumbs.ordering.web.dto.CancelRequest;
+import com.sugarcrumbs.ordering.web.dto.EditLinesRequest;
+import com.sugarcrumbs.ordering.web.dto.NotesRequest;
 import com.sugarcrumbs.ordering.web.dto.OrderResponse;
+import com.sugarcrumbs.ordering.web.dto.RejectRequest;
 import com.sugarcrumbs.ordering.web.dto.RescheduleRequest;
 import com.sugarcrumbs.ordering.web.mapper.OrderMapper;
 import jakarta.validation.Valid;
@@ -22,12 +25,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * The Owner's orders: list, view and move them through their lifecycle. Owner
- * only. Guests place orders through {@link PublicOrderController}. #16 adds
- * search, rejection and line edits.
+ * The Owner's orders: list, search, view, edit while pending and move them through their
+ * lifecycle. Owner only. Guests place orders through {@link PublicOrderController}.
+ *
+ * <pre>
+ * PENDING → CONFIRMED → IN_PROGRESS → FULFILLED
+ *    │          └──────────────────────↗
+ *    └→ REJECTED          CONFIRMED / IN_PROGRESS → CANCELLED
+ * </pre>
  */
 @RestController
 @RequestMapping("/api/orders")
@@ -46,20 +55,32 @@ public class OrderController {
         return orderMapper.toResponse(orderService.getOrThrow(id));
     }
 
-    /** The owner's calendar: any combination of pickup range and status, all optional. */
+    /**
+     * The Owner's calendar and order list. Every filter is optional: a pickup range
+     * ({@code from} inclusive, {@code to} exclusive, either end open), one or more {@code status}
+     * values ({@code ?status=PENDING&status=CONFIRMED}) and {@code q}, a case-insensitive search
+     * on the reference and the guest's name, email and phone.
+     */
     @GetMapping
     public Page<OrderResponse> calendar(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
-            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) List<OrderStatus> status,
+            @RequestParam(required = false) String q,
             @PageableDefault(size = 50, sort = "pickupAt", direction = Sort.Direction.ASC) Pageable pageable
     ) {
-        return orderService.calendar(from, to, status, pageable).map(orderMapper::toResponse);
+        return orderService.calendar(from, to, status, q, pageable).map(orderMapper::toResponse);
     }
 
     @PatchMapping("/{id}/confirm")
     public OrderResponse confirm(@PathVariable UUID id) {
         return orderMapper.toResponse(orderService.confirm(id));
+    }
+
+    /** Turns down a pending order, with a reason for the guest. */
+    @PatchMapping("/{id}/reject")
+    public OrderResponse reject(@PathVariable UUID id, @Valid @RequestBody RejectRequest request) {
+        return orderMapper.toResponse(orderService.reject(id, request.reason()));
     }
 
     @PatchMapping("/{id}/start-preparation")
@@ -72,7 +93,7 @@ public class OrderController {
         return orderMapper.toResponse(orderService.fulfill(id));
     }
 
-    /** Rejects a pending order or cancels a confirmed one; #16 splits out REJECTED. */
+    /** Calls off a confirmed or in-progress order. A pending one is rejected instead (400). */
     @PatchMapping("/{id}/cancel")
     public OrderResponse cancel(@PathVariable UUID id, @Valid @RequestBody CancelRequest request) {
         return orderMapper.toResponse(orderService.cancel(id, request.reason()));
@@ -81,5 +102,17 @@ public class OrderController {
     @PutMapping("/{id}/schedule")
     public OrderResponse reschedule(@PathVariable UUID id, @Valid @RequestBody RescheduleRequest request) {
         return orderMapper.toResponse(orderService.reschedule(id, request.pickupAt()));
+    }
+
+    /** Replaces a pending order's lines; items left out are removed. */
+    @PutMapping("/{id}/lines")
+    public OrderResponse editLines(@PathVariable UUID id, @Valid @RequestBody EditLinesRequest request) {
+        return orderMapper.toResponse(orderService.editLines(id, request.lines()));
+    }
+
+    /** Replaces a pending order's notes. */
+    @PutMapping("/{id}/notes")
+    public OrderResponse updateNotes(@PathVariable UUID id, @Valid @RequestBody NotesRequest request) {
+        return orderMapper.toResponse(orderService.updateNotes(id, request.notes()));
     }
 }

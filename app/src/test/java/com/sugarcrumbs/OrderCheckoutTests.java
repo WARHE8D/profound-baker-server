@@ -112,6 +112,7 @@ class OrderCheckoutTests extends AbstractIntegrationTest {
         assertThat(stockOf(rolls)).isEqualTo(6);
         assertThat(stockOf(cookies)).isZero();
 
+        owner.patch().uri("/api/orders/{id}/confirm", checkout.getBody().get("id")).retrieve().toBodilessEntity();
         owner.patch().uri("/api/orders/{id}/cancel", checkout.getBody().get("id"))
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("reason", "changed plans"))
                 .retrieve().toBodilessEntity();

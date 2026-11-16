@@ -75,6 +75,15 @@ public class OrderLine extends BaseEntity {
         this.lineTotal = this.unitPrice.multiply(BigDecimal.valueOf(quantity));
     }
 
+    /** Only through {@link Order#editLines}; the snapshot price stays, the total follows the quantity. */
+    void changeQuantity(int newQuantity) {
+        if (newQuantity <= 0) {
+            throw new IllegalArgumentException("quantity must be positive");
+        }
+        this.quantity = newQuantity;
+        this.lineTotal = this.unitPrice.multiply(BigDecimal.valueOf(newQuantity));
+    }
+
     // ---- Getters only ----
 
     public Order getOrder() {

@@ -16,8 +16,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -60,6 +63,9 @@ public class Order extends BaseEntity {
 
     @Column(name = "cancellation_reason", length = 300)
     private String cancellationReason;
+
+    @Column(name = "rejection_reason", length = 300)
+    private String rejectionReason;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("lineNo ASC")
@@ -118,15 +124,75 @@ public class Order extends BaseEntity {
         this.cancellationReason = reason;
     }
 
+    /**
+     * The Owner turns down a pending order. Only a pending one: once confirmed, calling it
+     * off is a cancellation, which reports count differently. A guest is owed a reason.
+     */
+    public void reject(String reason) {
+        requireStatus(OrderStatus.PENDING, "reject");
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("a rejection needs a reason");
+        }
+        this.status = OrderStatus.REJECTED;
+        this.rejectionReason = reason.strip();
+    }
+
     public void reschedule(Instant newPickupAt) {
-        if (status == OrderStatus.CANCELLED || status == OrderStatus.FULFILLED) {
+        if (status == OrderStatus.FULFILLED || OrderStatus.WITHDRAWN.contains(status)) {
             throw new IllegalStateException("cannot reschedule an order in status " + status);
         }
         this.pickupAt = Objects.requireNonNull(newPickupAt, "pickupAt is required");
     }
 
+    /** Only while pending: once confirmed, the Owner has agreed to the order as it stood. */
     public void updateNotes(String newNotes) {
+        requireStatus(OrderStatus.PENDING, "edit the notes of");
         this.notes = newNotes;
+    }
+
+    /**
+     * Replaces the order's contents with {@code drafts}, the full list of lines wanted, while it
+     * is still pending. Lines are matched by item: an item already on the order keeps its line,
+     * its line number and the name and price the guest saw (only its quantity changes); an item
+     * not on it gets a new line at the end with the draft's snapshot; an item left out loses its
+     * line, including a line whose item has since been deleted from the catalog.
+     *
+     * <p>New lines are numbered after every existing one, removed ones included, so a number is
+     * never reused within one flush (Hibernate inserts before it deletes, and line numbers are
+     * unique per order). Numbers may therefore have gaps; they only fix the display order.
+     */
+    public void editLines(List<LineDraft> drafts) {
+        requireStatus(OrderStatus.PENDING, "edit the lines of");
+        if (drafts == null || drafts.isEmpty()) {
+            throw new IllegalArgumentException("an order needs at least one line");
+        }
+        Map<UUID, LineDraft> wanted = new LinkedHashMap<>();
+        for (LineDraft draft : drafts) {
+            if (wanted.putIfAbsent(Objects.requireNonNull(draft.itemId(), "itemId"), draft) != null) {
+                throw new IllegalArgumentException("each item may appear only once in an order");
+            }
+            // Checked up front so a bad draft leaves the order untouched rather than half edited.
+            if (draft.quantity() <= 0) {
+                throw new IllegalArgumentException("quantity must be positive");
+            }
+        }
+        int nextLineNo = lines.stream().mapToInt(OrderLine::getLineNo).max().orElse(0) + 1;
+        Map<UUID, OrderLine> current = new HashMap<>();
+        for (OrderLine line : lines) {
+            if (line.getItemId() != null) {
+                current.put(line.getItemId(), line);
+            }
+        }
+        lines.removeIf(line -> line.getItemId() == null || !wanted.containsKey(line.getItemId()));
+        for (LineDraft draft : wanted.values()) {
+            OrderLine existing = current.get(draft.itemId());
+            if (existing != null) {
+                existing.changeQuantity(draft.quantity());
+            } else {
+                lines.add(new OrderLine(this, nextLineNo++, draft.itemId(), draft.itemName(), draft.unitPrice(),
+                        draft.quantity()));
+            }
+        }
     }
 
     /** Sum of the line snapshots: what the order costs, whatever the catalog says today. */
@@ -172,6 +238,10 @@ public class Order extends BaseEntity {
 
     public String getCancellationReason() {
         return cancellationReason;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
     }
 
     public List<OrderLine> getLines() {

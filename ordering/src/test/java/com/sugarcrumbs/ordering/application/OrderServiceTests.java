@@ -2,11 +2,13 @@ package com.sugarcrumbs.ordering.application;
 
 import com.sugarcrumbs.catalog.CatalogApi;
 import com.sugarcrumbs.catalog.ItemSnapshot;
+import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.OwnerSettings;
 import com.sugarcrumbs.ordering.config.OrderProperties;
 import com.sugarcrumbs.ordering.domain.GuestContact;
 import com.sugarcrumbs.ordering.domain.Order;
+import com.sugarcrumbs.ordering.domain.OrderStatus;
 import com.sugarcrumbs.ordering.persistence.OrderRepository;
 import com.sugarcrumbs.ordering.persistence.WorkingHoursRepository;
 import com.sugarcrumbs.ordering.web.dto.CheckoutRequest;
@@ -17,6 +19,7 @@ import com.sugarcrumbs.ordering.web.dto.TimeSlotResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -27,6 +30,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -35,11 +39,16 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +56,9 @@ import static org.mockito.Mockito.when;
  * Checkout rules (#15) that don't need a database: the configurable size limits, pickup times
  * that aren't in the future, and the slot lock being taken before capacity is counted. The race
  * itself is proven against Postgres by {@code CheckoutConcurrencyTests} in {@code app}.
+ *
+ * <p>Owner order management (#16): rejecting, the pending/confirmed split between reject and
+ * cancel, and line edits moving stock by the difference only.
  */
 class OrderServiceTests {
 
@@ -157,7 +169,98 @@ class OrderServiceTests {
         assertThat(order.getPickupAt()).isEqualTo(pickupAt);
     }
 
+    @Test
+    void rejectingReleasesEveryLinesStock() {
+        UUID bread = UUID.randomUUID();
+        UUID orderId = stubOrder(pendingOrder(bread, 2));
+
+        service.reject(orderId, "fully booked");
+
+        verify(catalogApi).releaseStock(bread, 2);
+    }
+
+    /** An Owner refusing a pending order is a rejection; letting cancel do it would hide that from reports. */
+    @Test
+    void theOwnerCannotCancelAPendingOrder() {
+        Order order = pendingOrder(UUID.randomUUID(), 1);
+        UUID orderId = stubOrder(order);
+
+        assertThatIllegalStateException().isThrownBy(() -> service.cancel(orderId, "no"))
+                .withMessage("a pending order is rejected, not cancelled");
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        verify(catalogApi, never()).releaseStock(any(), anyInt());
+    }
+
+    @Test
+    void editingLinesMovesStockByTheDifferenceOnly() {
+        UUID kept = UUID.randomUUID();
+        UUID dropped = UUID.randomUUID();
+        UUID added = UUID.randomUUID();
+        UUID unchanged = UUID.randomUUID();
+        Order order = Order.builder().reference("SC-7F3K2").pickupAt(pickupAt)
+                .guestContact(new GuestContact("Ada", "ada@example.com", "+1 555 0100"))
+                .line(kept, "Kept", new BigDecimal("5.00"), 2)
+                .line(dropped, "Dropped", new BigDecimal("1.00"), 3)
+                .line(unchanged, "Unchanged", new BigDecimal("4.00"), 1)
+                .build();
+        UUID orderId = stubOrder(order);
+
+        service.editLines(orderId, List.of(
+                new OrderLineRequest(kept, 5),
+                new OrderLineRequest(unchanged, 1),
+                new OrderLineRequest(added, 2)));
+
+        verify(catalogApi).reserveStock(kept, 3);
+        verify(catalogApi).releaseStock(dropped, 3);
+        verify(catalogApi).reserveStock(added, 2);
+        verify(catalogApi, never()).reserveStock(eq(unchanged), anyInt());
+        verify(catalogApi, never()).releaseStock(eq(unchanged), anyInt());
+        verify(catalogApi).getItems(List.of(added));
+    }
+
+    @Test
+    void anEditCannotAddAnItemThatIsNotOrderable() {
+        UUID hidden = UUID.randomUUID();
+        when(catalogApi.getItems(List.of(hidden))).thenReturn(Map.of(hidden,
+                new ItemSnapshot(hidden, "Off-menu", BigDecimal.ONE, 0, false, false)));
+        UUID orderId = stubOrder(pendingOrder(UUID.randomUUID(), 1));
+
+        assertThatThrownBy(() -> service.editLines(orderId, List.of(new OrderLineRequest(hidden, 1))))
+                .isInstanceOf(ConflictException.class);
+        verify(catalogApi, never()).reserveStock(any(), anyInt());
+    }
+
+    @Test
+    void anEditIsHeldToTheCheckoutLimits() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> service.editLines(UUID.randomUUID(), List.of(new OrderLineRequest(UUID.randomUUID(), 6))))
+                .withMessage("line 1: at most 5 of one item per order");
+        verifyNoInteractions(orderRepository, catalogApi);
+    }
+
+    @Test
+    void aCalendarRangeMustRunForwardsAndASearchMustBeShort() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> service.calendar(pickupAt, pickupAt, null, null, Pageable.unpaged()));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> service.calendar(null, null, null, "x".repeat(101), Pageable.unpaged()));
+        verifyNoInteractions(orderRepository);
+    }
+
     // ---- helpers ----
+
+    private Order pendingOrder(UUID itemId, int quantity) {
+        return Order.builder().reference("SC-7F3K2").pickupAt(pickupAt)
+                .guestContact(new GuestContact("Ada", "ada@example.com", "+1 555 0100"))
+                .line(itemId, "Bread", new BigDecimal("5.00"), quantity)
+                .build();
+    }
+
+    private UUID stubOrder(Order order) {
+        UUID orderId = UUID.randomUUID();
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        return orderId;
+    }
 
     private void stubOpenSlot() {
         when(workingHoursRepository.findForUpdate(ownerId, weekday())).thenReturn(Optional.empty());
