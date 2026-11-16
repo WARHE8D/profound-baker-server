@@ -24,8 +24,8 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Token-bucket rate limits per client IP (Bucket4j) on login and guest checkout
- * (CLAUDE.md §5). A rejected request gets a 429 {@code ApiError} with
+ * Token-bucket rate limits per client IP (Bucket4j) on login, guest checkout and
+ * the guest's magic-link routes (CLAUDE.md §5). A rejected request gets a 429 {@code ApiError} with
  * {@code Retry-After}; it never reaches the controller, so a password guess
  * past the limit is not even checked.
  *
@@ -54,7 +54,9 @@ class RateLimitFilter extends OncePerRequestFilter {
         PathPatternRequestMatcher.Builder paths = PathPatternRequestMatcher.withDefaults();
         this.policies = List.of(
                 new Policy("login", paths.matcher(HttpMethod.POST, "/api/auth/login"), properties.login()),
-                new Policy("checkout", paths.matcher(HttpMethod.POST, "/api/public/orders"), properties.checkout()));
+                new Policy("checkout", paths.matcher(HttpMethod.POST, "/api/public/orders"), properties.checkout()),
+                // Any method: viewing and cancelling share one bucket, so probing for tokens costs the same either way.
+                new Policy("magic-link", paths.matcher("/api/public/orders/by-token/**"), properties.magicLink()));
         this.resolver = resolver;
 
         // An idle bucket may only be dropped once it would have refilled completely anyway;

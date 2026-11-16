@@ -64,6 +64,8 @@ class SecurityConfig {
                         // The shopper surface: public reads, and guest checkout as its only write.
                         .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/public/orders").permitAll()
+                        // The guest's own order: the magic-link token in the path is the credential.
+                        .requestMatchers(HttpMethod.POST, "/api/public/orders/by-token/*/cancel").permitAll()
                         // Image files (Caddy serves them directly in prod) and API docs.
                         .requestMatchers(HttpMethod.GET, "/uploads/**", "/v3/api-docs/**", "/swagger-ui/**",
                                 "/swagger-ui.html").permitAll()

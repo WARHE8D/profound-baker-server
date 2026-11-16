@@ -121,6 +121,8 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "GET,  /api/public/catalogue/categories",
             "GET,  /api/public/availability?from=2026-12-01&to=2026-12-02",
             "POST, /api/public/orders",
+            "GET,  /api/public/orders/by-token/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "POST, /api/public/orders/by-token/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/cancel",
             "POST, /api/auth/login",
             "POST, /api/auth/refresh",
             "GET,  /.well-known/jwks.json",

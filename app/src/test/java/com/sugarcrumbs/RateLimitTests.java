@@ -29,7 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "app.rate-limit.login.capacity=3",
         "app.rate-limit.login.period=1h",
         "app.rate-limit.checkout.capacity=2",
-        "app.rate-limit.checkout.period=1h"
+        "app.rate-limit.checkout.period=1h",
+        "app.rate-limit.magic-link.capacity=2",
+        "app.rate-limit.magic-link.period=1h"
 })
 class RateLimitTests extends AbstractIntegrationTest {
 
@@ -97,6 +99,20 @@ class RateLimitTests extends AbstractIntegrationTest {
 
         // Invalid checkouts still count: the bucket is spent before the body is even read.
         assertThat(statuses).containsExactly(400, 400, 429);
+    }
+
+    /** Viewing and cancelling share a bucket, so switching between them doesn't buy more guesses. */
+    @Test
+    void magicLinkRoutesShareOneLimitPerClient() {
+        String token = "A".repeat(43);
+        int view = http.get().uri("/api/public/orders/by-token/{token}", token)
+                .retrieve().toBodilessEntity().getStatusCode().value();
+        int cancel = http.post().uri("/api/public/orders/by-token/{token}/cancel", token)
+                .retrieve().toBodilessEntity().getStatusCode().value();
+        int limited = http.get().uri("/api/public/orders/by-token/{token}", token)
+                .retrieve().toBodilessEntity().getStatusCode().value();
+
+        assertThat(List.of(view, cancel, limited)).containsExactly(404, 404, 429);
     }
 
     @Test

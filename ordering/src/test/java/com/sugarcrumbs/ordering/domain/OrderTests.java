@@ -345,6 +345,18 @@ class OrderTests {
             assertThat(order.isAccessTokenValid(order.getAccessTokenExpiresAt())).isFalse();
         }
 
+        @Test
+        void aGuestMayCancelOnlyAPendingOrConfirmedOrderUpToTheCutoff() {
+            java.time.Duration day = java.time.Duration.ofHours(24);
+
+            assertThat(inStatus(OrderStatus.PENDING).guestCancellableUntil(day)).contains(PICKUP.minus(day));
+            assertThat(inStatus(OrderStatus.CONFIRMED).guestCancellableUntil(day)).contains(PICKUP.minus(day));
+            for (OrderStatus later : new OrderStatus[] {OrderStatus.IN_PROGRESS, OrderStatus.FULFILLED,
+                    OrderStatus.REJECTED, OrderStatus.CANCELLED}) {
+                assertThat(inStatus(later).guestCancellableUntil(day)).as("%s", later).isEmpty();
+            }
+        }
+
         /** Orders from before magic links have no token, so there is nothing to expire. */
         @Test
         void anOrderWithoutATokenGetsNoExpiry() {
