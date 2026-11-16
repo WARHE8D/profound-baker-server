@@ -75,11 +75,12 @@ public class OrderService {
     private final OrderProperties properties;
     private final ApplicationEventPublisher events;
     private final GuestAccessTokens accessTokens;
+    private final InvoiceService invoiceService;
 
     public OrderService(OrderRepository orderRepository, WorkingHoursRepository workingHoursRepository,
                         CatalogApi catalogApi, AvailabilityService availabilityService, OwnerApi ownerApi,
                         OrderProperties properties, ApplicationEventPublisher events,
-                        GuestAccessTokens accessTokens) {
+                        GuestAccessTokens accessTokens, InvoiceService invoiceService) {
         this.orderRepository = orderRepository;
         this.workingHoursRepository = workingHoursRepository;
         this.catalogApi = catalogApi;
@@ -88,6 +89,7 @@ public class OrderService {
         this.properties = properties;
         this.events = events;
         this.accessTokens = accessTokens;
+        this.invoiceService = invoiceService;
     }
 
     /**
@@ -178,9 +180,11 @@ public class OrderService {
         return orderRepository.findAll(OrderSpecifications.combine(from, to, statuses, search), pageable);
     }
 
+    /** Accepts a pending order and issues its invoice (#20). */
     public Order confirm(UUID id) {
         Order order = getOrThrow(id);
         order.confirm();
+        invoiceService.issueFor(order);
         publish(new OrderConfirmed(order.getId(), order.getReference(), order.getPickupAt(), Instant.now()));
         return order;
     }
@@ -224,6 +228,7 @@ public class OrderService {
         }
         order.cancel(reason);
         releaseStock(order);
+        invoiceService.voidIfPending(order);
         publishCancelled(order, CancelledBy.OWNER);
         return order;
     }
@@ -342,6 +347,7 @@ public class OrderService {
         }
         order.cancel(reason == null || reason.isBlank() ? "Cancelled by the guest" : reason.strip());
         releaseStock(order);
+        invoiceService.voidIfPending(order);
         publishCancelled(order, CancelledBy.GUEST);
         return order;
     }
@@ -390,6 +396,7 @@ public class OrderService {
         for (Order order : stale) {
             order.cancel("Automatically cancelled: not confirmed within the hold window");
             releaseStock(order);
+            // Never confirmed, so never invoiced: nothing to void.
             publishCancelled(order, CancelledBy.SYSTEM);
         }
         return stale.size();

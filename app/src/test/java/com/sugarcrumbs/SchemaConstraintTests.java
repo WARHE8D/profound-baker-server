@@ -170,6 +170,14 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
         assertViolates("uk_invoices_order", () -> insertInvoice(order));
     }
 
+    @Test
+    void invoiceNumbersAreUnique() {
+        insertInvoice(insertOrder("CONFIRMED", "SC-AAAAA"), "INV-1999-0001");
+
+        assertViolates("uk_invoices_number",
+                () -> insertInvoice(insertOrder("CONFIRMED", "SC-AAAAB"), "INV-1999-0001"));
+    }
+
     // ---- helpers ----
 
     private static void assertViolates(String constraint, Runnable insert) {
@@ -237,10 +245,14 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
     }
 
     private void insertInvoice(UUID orderId) {
+        insertInvoice(orderId, "INV-1999-" + (10_000 + (int) (Math.random() * 90_000)));
+    }
+
+    private void insertInvoice(UUID orderId, String number) {
         jdbc.update("""
                 INSERT INTO ordering.invoices
-                    (id, created_at, updated_at, version, order_id, subtotal, status)
-                VALUES (gen_random_uuid(), now(), now(), 0, ?, 10.00, 'PENDING')
-                """, orderId);
+                    (id, created_at, updated_at, version, order_id, number, subtotal, status)
+                VALUES (gen_random_uuid(), now(), now(), 0, ?, ?, 10.00, 'PENDING')
+                """, orderId, number);
     }
 }

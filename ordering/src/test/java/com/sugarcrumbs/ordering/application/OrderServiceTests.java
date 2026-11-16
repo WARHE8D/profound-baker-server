@@ -90,8 +90,9 @@ class OrderServiceTests {
     private final OwnerApi ownerApi = mock(OwnerApi.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final GuestAccessTokens tokens = new GuestAccessTokens();
+    private final InvoiceService invoiceService = mock(InvoiceService.class);
     private final OrderService service = new OrderService(orderRepository, workingHoursRepository, catalogApi,
-            availabilityService, ownerApi, LIMITS, events, tokens);
+            availabilityService, ownerApi, LIMITS, events, tokens, invoiceService);
 
     private final UUID ownerId = UUID.randomUUID();
     /** Tomorrow 09:00 UTC: comfortably in the future and the start of the stubbed slot. */
@@ -421,6 +422,30 @@ class OrderServiceTests {
 
         assertThatThrownBy(() -> service.cancelByGuest(token, null)).isInstanceOf(ConflictException.class);
         assertThat(order.getStatus()).isEqualTo(OrderStatus.IN_PROGRESS);
+    }
+
+    /** The invoice follows the order (#20): issued on confirm, voided on any cancellation. */
+    @Test
+    void confirmingIssuesTheInvoiceAndCancellingVoidsIt() {
+        Order byOwner = pendingOrder(UUID.randomUUID(), 1);
+        UUID ownerOrderId = stubOrder(byOwner);
+        service.confirm(ownerOrderId);
+        verify(invoiceService).issueFor(byOwner);
+
+        service.cancel(ownerOrderId, "flooded");
+        verify(invoiceService).voidIfPending(byOwner);
+
+        Order byGuest = guestOrder(UUID.randomUUID(), pickupAt.plus(3, ChronoUnit.DAYS));
+        byGuest.confirm();
+        service.cancelByGuest(stubToken(byGuest), null);
+        verify(invoiceService).voidIfPending(byGuest);
+    }
+
+    @Test
+    void aRejectedOrderWasNeverInvoiced() {
+        service.reject(stubOrder(pendingOrder(UUID.randomUUID(), 1)), "fully booked");
+
+        verifyNoInteractions(invoiceService);
     }
 
     // ---- helpers ----
