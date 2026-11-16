@@ -73,6 +73,10 @@ class OrderMigrationTests {
         assertThat((BigDecimal) line.get("line_total")).isEqualByComparingTo("49.00");
 
         assertThat(jdbc.queryForObject("SELECT order_id FROM ordering.invoices", UUID.class)).isEqualTo(older);
+        // V5 numbers invoices from before numbering, and the sequence carries on after them.
+        assertThat(jdbc.queryForObject("SELECT number FROM ordering.invoices", String.class))
+                .matches("INV-\\d{4}-0001");
+        assertThat(jdbc.queryForObject("SELECT nextval('ordering.invoice_number_seq')", Long.class)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT to_regclass('ordering.bookings')", String.class)).isNull();
     }
 

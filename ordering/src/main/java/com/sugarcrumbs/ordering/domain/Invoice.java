@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * The billing record for an {@link Order}.
@@ -21,6 +22,8 @@ import java.util.Objects;
  * <p>One invoice per order, enforced by a unique FK: deliberately a
  * {@code @OneToOne}, since this system doesn't split one order across
  * several invoices.
+ *
+ * <p>Issued when the Owner confirms the order (#20), numbered {@code INV-YYYY-NNNN}.
  */
 @Entity
 @Table(
@@ -32,6 +35,13 @@ import java.util.Objects;
 public class Invoice extends BaseEntity {
 
     private static final int AMOUNT_SCALE = 2;
+
+    /** {@code INV-}, the year of issue, then a sequence number of at least four digits. */
+    public static final Pattern NUMBER_FORMAT = Pattern.compile("INV-\\d{4}-\\d{4,}");
+
+    /** What the guest and the Owner quote, e.g. {@code INV-2026-0042}. */
+    @Column(name = "number", nullable = false, updatable = false, length = 20)
+    private String number;
 
     @NotNull
     @OneToOne(fetch = FetchType.LAZY, optional = false)
@@ -72,6 +82,10 @@ public class Invoice extends BaseEntity {
 
     private Invoice(Builder builder) {
         this.order = Objects.requireNonNull(builder.order, "order is required");
+        if (builder.number == null || !NUMBER_FORMAT.matcher(builder.number).matches()) {
+            throw new IllegalArgumentException("invalid invoice number: " + builder.number);
+        }
+        this.number = builder.number;
         this.subtotal = normalize(Objects.requireNonNull(builder.subtotal, "subtotal is required"));
         if (builder.discountAmount != null) {
             applyDiscount(builder.discountAmount);
@@ -133,6 +147,10 @@ public class Invoice extends BaseEntity {
 
     // ---- Getters only ----
 
+    public String getNumber() {
+        return number;
+    }
+
     public Order getOrder() {
         return order;
     }
@@ -163,11 +181,12 @@ public class Invoice extends BaseEntity {
 
     @Override
     public String toString() {
-        return "Invoice{id=%s, status=%s, total=%s}".formatted(getId(), status, getTotal());
+        return "Invoice{id=%s, number=%s, status=%s, total=%s}".formatted(getId(), number, status, getTotal());
     }
 
     public static final class Builder {
         private Order order;
+        private String number;
         private BigDecimal subtotal;
         private BigDecimal discountAmount;
 
@@ -176,6 +195,11 @@ public class Invoice extends BaseEntity {
 
         public Builder order(Order order) {
             this.order = order;
+            return this;
+        }
+
+        public Builder number(String number) {
+            this.number = number;
             return this;
         }
 
