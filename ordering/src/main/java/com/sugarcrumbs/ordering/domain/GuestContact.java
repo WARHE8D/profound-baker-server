@@ -9,10 +9,10 @@ import jakarta.validation.constraints.Size;
 import java.util.Objects;
 
 /**
- * Contact details for a guest booking — no {@code Customer} entity or
+ * Contact details for a guest order — no {@code Customer} entity or
  * login required. Modeled as an embeddable value object (not its own
  * table) because it has no identity or lifecycle independent of the
- * {@link Booking} it belongs to; two bookings with the same email are
+ * {@link Order} it belongs to; two orders with the same email are
  * two separate contacts, not a shared one.
  */
 @Embeddable

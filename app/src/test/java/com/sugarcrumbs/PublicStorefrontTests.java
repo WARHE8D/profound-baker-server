@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * The shopper surface under {@code /api/public/**} (#13), end to end and without
  * a token: the storefront shows only available items and never the Owner's
- * fields, availability is readable, and guest checkout places a booking the
+ * fields, availability is readable, and guest checkout places an order the
  * Owner then sees.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -132,7 +132,7 @@ class PublicStorefrontTests extends AbstractIntegrationTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void aGuestChecksOutIntoAnOpenSlotAndTheOwnerSeesTheBooking() {
+    void aGuestChecksOutIntoAnOpenSlotAndTheOwnerSeesTheOrder() {
         String itemId = createItem("Birthday cake", null);
         LocalDate day = LocalDate.now(ZoneOffset.UTC).plusDays(40);
         owner.put().uri("/api/availability/working-hours/{day}", day.getDayOfWeek())
@@ -149,19 +149,18 @@ class PublicStorefrontTests extends AbstractIntegrationTest {
         ResponseEntity<Map> checkout = shopper.post().uri("/api/public/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of(
-                        "itemId", itemId,
-                        "quantity", 1,
-                        "scheduledFor", day + "T" + slot.get("startTime") + "Z",
+                        "pickupAt", day + "T" + slot.get("startTime") + "Z",
+                        "lines", List.of(Map.of("itemId", itemId, "quantity", 1)),
                         "guestContact", Map.of("name", "Guest", "email", "guest@example.com", "phone", "555-0100")))
                 .retrieve().toEntity(Map.class);
 
         assertThat(checkout.getStatusCode().value()).isEqualTo(201);
         assertThat(checkout.getHeaders().getLocation()).isNull();
         assertThat(checkout.getBody()).containsEntry("status", "PENDING");
-        String bookingId = (String) checkout.getBody().get("id");
-        assertThat(owner.get().uri("/api/bookings/{id}", bookingId)
+        String orderId = (String) checkout.getBody().get("id");
+        assertThat(owner.get().uri("/api/orders/{id}", orderId)
                 .retrieve().toBodilessEntity().getStatusCode().value()).isEqualTo(200);
-        assertThat(shopper.get().uri("/api/bookings/{id}", bookingId)
+        assertThat(shopper.get().uri("/api/orders/{id}", orderId)
                 .retrieve().toBodilessEntity().getStatusCode().value()).isEqualTo(401);
     }
 

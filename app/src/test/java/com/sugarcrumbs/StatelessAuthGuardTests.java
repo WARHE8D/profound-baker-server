@@ -84,7 +84,7 @@ class StatelessAuthGuardTests extends AbstractIntegrationTest {
         ResponseEntity<String> me = http.get().uri("/api/auth/me")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve().toEntity(String.class);
-        ResponseEntity<String> ownerRoute = http.get().uri("/api/bookings")
+        ResponseEntity<String> ownerRoute = http.get().uri("/api/orders")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve().toEntity(String.class);
         ResponseEntity<String> failedLogin = http.post().uri("/api/auth/login")
@@ -99,7 +99,7 @@ class StatelessAuthGuardTests extends AbstractIntegrationTest {
 
     @Test
     void cookiesNeverAuthenticateARequest() {
-        ResponseEntity<String> response = http.get().uri("/api/bookings")
+        ResponseEntity<String> response = http.get().uri("/api/orders")
                 .header(HttpHeaders.COOKIE, "JSESSIONID=forged; SESSION=forged; access_token="
                         + OwnerFixture.accessToken(http))
                 .retrieve().toEntity(String.class);
@@ -113,7 +113,7 @@ class StatelessAuthGuardTests extends AbstractIntegrationTest {
         String basic = Base64.getEncoder().encodeToString(
                 (OwnerFixture.EMAIL + ":" + OwnerFixture.PASSWORD).getBytes(StandardCharsets.UTF_8));
 
-        ResponseEntity<String> response = http.get().uri("/api/bookings")
+        ResponseEntity<String> response = http.get().uri("/api/orders")
                 .header(HttpHeaders.AUTHORIZATION, "Basic " + basic)
                 .retrieve().toEntity(String.class);
 

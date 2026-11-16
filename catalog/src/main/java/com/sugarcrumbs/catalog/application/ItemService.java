@@ -164,19 +164,16 @@ public class ItemService {
 
     /**
      * Hard delete, guarded by every {@link ItemReferenceGuard} (today:
-     * ordering's bookings) so the catalog never has to know which modules
-     * reference its items: an item with any
-     * booking history (past or present — cancelled ones included, since
-     * those still have real history worth keeping queryable) can't be
-     * deleted, so the owner gets a clear 409 instead of the DB rejecting
-     * a non-nullable foreign key with an opaque constraint error. Prefer
+     * ordering's order lines) so the catalog never has to know which modules
+     * reference its items: an item that any order (cancelled ones included)
+     * points at can't be deleted, and the owner gets a clear 409. Prefer
      * {@link #changeAvailability} to retire an item without deleting it.
      */
     public void delete(UUID id) {
         Item item = getOrThrow(id);
         if (referenceGuards.stream().anyMatch(guard -> guard.isReferenced(id))) {
             throw new ConflictException(
-                    "cannot delete item '" + item.getName() + "': it has booking history. Mark it unavailable instead.");
+                    "cannot delete item '" + item.getName() + "': it has order history. Mark it unavailable instead.");
         }
         List<String> imageUrls = List.copyOf(item.getImageUrls());
         itemRepository.delete(item);

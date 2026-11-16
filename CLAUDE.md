@@ -46,10 +46,11 @@ The system is **single-tenant**: there is exactly one Owner. Don't add multi-ten
 | Deployment | Single VPS with Docker Compose. Caddy handles TLS and reverse proxy. Images are stored on local disk |
 
 ### Already built and worth keeping
-- Booking state machine guarded inside the entity (`entity/Booking.java`). It becomes `Order` in #14.
+- Multi-item `Order` aggregate (`ordering/domain/Order.java`, #14): `OrderLine`s with name/price snapshots, a
+  human-readable reference (`SC-7F3K2`), and the state machine guarded inside the entity.
 - Slot availability engine (`service/AvailabilityService.java`): working hours + blocked dates + current
-  bookings give per-slot remaining capacity. Range queries are capped at 62 days.
-- Stale-pending auto-cancel job (`config/StaleBookingCleanupJob.java`, `app.booking.pending-hold-hours`).
+  orders give per-slot remaining capacity. Range queries are capped at 62 days.
+- Stale-pending auto-cancel job (`StaleOrderCleanupJob`, `app.order.pending-hold-hours`).
 - Item stock tracking (`stockQuantity == null` means not tracked). Decremented on order, released on cancel.
 - Image upload behind the `ImageStorageService` interface, with a content-type allowlist and sanitized paths.
   Files are served at `/uploads/**` (Caddy from the read-only volume in prod, `UploadsResourceConfig` in the
@@ -69,10 +70,9 @@ and springdoc. The `app` module is packaged as an executable jar, `app/target/ba
 Known problems (see the PLAN.md §2 table; the issue that fixes each one is in brackets):
 - Paged responses are serialized as Spring Data's `PageImpl` (it logs a warning); switching to `VIA_DTO`
   (`content` + `page{}`) changes every list endpoint's JSON, so do it before the SPA depends on the shape.
-- **Overbooking race:** capacity is checked, then the booking is inserted, with no lock in between. [#15]
+- **Overbooking race:** capacity is checked, then the order is inserted, with no lock in between. [#15]
 - Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also
   uses `toHours()`, which rounds down. [#15]
-- No price snapshot, so repricing an item rewrites historical orders. [#14]
 
 ---
 
@@ -94,7 +94,7 @@ profound-baker-server/
 │                    #                           No business rules. (The time zone is Owner.timeZone, via OwnerApi.)
 ├── identity/        # com.sugarcrumbs.identity  the Owner                  → future auth-service
 ├── catalog/         # com.sugarcrumbs.catalog   items, categories, images  → future catalog-service
-├── ordering/        # com.sugarcrumbs.ordering  bookings, availability,    → future order-service
+├── ordering/        # com.sugarcrumbs.ordering  orders, availability,      → future order-service
 │                    #                           invoices
 ├── app/             # com.sugarcrumbs           BakerApplication, application.properties, ModularityTests.
 │                    #                           The only bootable module; no business code.
@@ -115,13 +115,15 @@ Allowed dependencies (declared in each module's root `package-info.java` via `@A
    HTTP call: coarse-grained, batch-friendly (`getItems(Collection<UUID>)`), no lazy proxies, and no reliance on
    the caller's transaction for correctness.
 3. **No JPA relations across modules.** Store the other module's id as a plain `UUID` column
-   (`Booking.itemId`, `WorkingHours.ownerId`, `BlockedDate.ownerId`), with no `@ManyToOne` and no FK constraint
+   (`OrderLine.itemId`, `WorkingHours.ownerId`, `BlockedDate.ownerId`), with no `@ManyToOne` and no FK constraint
    in new migrations.
 4. **Each module owns its schema.** Every module has its own Postgres schema (`identity`, `catalog`,
    `ordering`; entities declare `@Table(schema = …)`), its own migrations in
    `<module>/src/main/resources/db/migration/<module>/`, and its own Flyway history table. `app`'s
    `FlywayModulesConfig` runs one Flyway per module. Never query another module's schema, even though they
-   share a database today. Migrations use unqualified table names (Flyway sets `search_path`).
+   share a database today. Migrations use unqualified table names (Flyway sets `search_path`). The single
+   agreed exception is `ordering`'s `V2__orders.sql`, which read `catalog.items` once to snapshot legacy
+   bookings (guarded for databases without a catalog schema); don't add others.
 5. **Reverse questions use extension points, not dependencies.** When catalog needs to know something only
    ordering knows (e.g. "is this item referenced?"), catalog publishes an interface (`ItemReferenceGuard`) and
    ordering implements it. For notifications, prefer domain events (`ApplicationEventPublisher`, Spring Modulith
