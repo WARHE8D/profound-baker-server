@@ -5,6 +5,14 @@ import com.sugarcrumbs.catalog.ItemSnapshot;
 import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.OwnerSettings;
+import com.sugarcrumbs.ordering.OrderCancelled;
+import com.sugarcrumbs.ordering.OrderCancelled.CancelledBy;
+import com.sugarcrumbs.ordering.OrderConfirmed;
+import com.sugarcrumbs.ordering.OrderEvent;
+import com.sugarcrumbs.ordering.OrderFulfilled;
+import com.sugarcrumbs.ordering.OrderPlaced;
+import com.sugarcrumbs.ordering.OrderRejected;
+import com.sugarcrumbs.ordering.OrderRescheduled;
 import com.sugarcrumbs.ordering.config.OrderProperties;
 import com.sugarcrumbs.ordering.domain.GuestContact;
 import com.sugarcrumbs.ordering.domain.Order;
@@ -19,6 +27,7 @@ import com.sugarcrumbs.ordering.web.dto.TimeSlotResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
@@ -44,10 +53,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -59,6 +70,10 @@ import static org.mockito.Mockito.when;
  *
  * <p>Owner order management (#16): rejecting, the pending/confirmed split between reject and
  * cancel, and line edits moving stock by the difference only.
+ *
+ * <p>Domain events (#17): each lifecycle change publishes its event, and a refused one publishes
+ * nothing. That listeners only see committed changes is shown against Postgres by
+ * {@code OrderEventsTests} in {@code app}.
  */
 class OrderServiceTests {
 
@@ -69,8 +84,9 @@ class OrderServiceTests {
     private final CatalogApi catalogApi = mock(CatalogApi.class);
     private final AvailabilityService availabilityService = mock(AvailabilityService.class);
     private final OwnerApi ownerApi = mock(OwnerApi.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final OrderService service = new OrderService(orderRepository, workingHoursRepository, catalogApi,
-            availabilityService, ownerApi, LIMITS);
+            availabilityService, ownerApi, LIMITS, events);
 
     private final UUID ownerId = UUID.randomUUID();
     /** Tomorrow 09:00 UTC: comfortably in the future and the start of the stubbed slot. */
@@ -245,6 +261,84 @@ class OrderServiceTests {
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> service.calendar(null, null, null, "x".repeat(101), Pageable.unpaged()));
         verifyNoInteractions(orderRepository);
+    }
+
+    @Test
+    void checkoutPublishesOrderPlacedAfterReservingStock() {
+        stubOpenSlot();
+        UUID bread = UUID.randomUUID();
+
+        Order order = service.place(checkout(pickupAt, List.of(new OrderLineRequest(bread, 2))));
+
+        InOrder inOrder = inOrder(catalogApi, events);
+        inOrder.verify(catalogApi).reserveStock(bread, 2);
+        inOrder.verify(events).publishEvent(any(OrderEvent.class));
+        verify(events).publishEvent(argThat((Object event) -> event instanceof OrderPlaced p
+                && p.reference().equals(order.getReference()) && p.pickupAt().equals(pickupAt)
+                && p.subtotal().compareTo(new BigDecimal("5.00")) == 0));
+    }
+
+    @Test
+    void eachOwnerTransitionPublishesItsEvent() {
+        Order confirmed = pendingOrder(UUID.randomUUID(), 1);
+        UUID confirmedId = stubOrder(confirmed);
+        service.confirm(confirmedId);
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderConfirmed c
+                && c.reference().equals("SC-7F3K2") && c.pickupAt().equals(pickupAt)));
+
+        service.fulfill(confirmedId);
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderFulfilled));
+
+        UUID rejectedId = stubOrder(pendingOrder(UUID.randomUUID(), 1));
+        service.reject(rejectedId, "fully booked");
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderRejected r
+                && r.reason().equals("fully booked")));
+
+        Order toCancel = pendingOrder(UUID.randomUUID(), 1);
+        toCancel.confirm();
+        service.cancel(stubOrder(toCancel), "flooded");
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderCancelled c
+                && c.by() == CancelledBy.OWNER && "flooded".equals(c.reason())));
+    }
+
+    @Test
+    void reschedulingPublishesBothTimesButNotWhenTheTimeIsUnchanged() {
+        stubOpenSlot();
+        Instant before = pickupAt.plus(1, ChronoUnit.DAYS);
+        Order order = Order.builder().reference("SC-7F3K2").pickupAt(before)
+                .guestContact(new GuestContact("Ada", "ada@example.com", "+1 555 0100"))
+                .line(UUID.randomUUID(), "Bread", new BigDecimal("5.00"), 1)
+                .build();
+        UUID orderId = stubOrder(order);
+
+        service.reschedule(orderId, pickupAt);
+        service.reschedule(orderId, pickupAt);
+
+        verify(events, times(1)).publishEvent(any(Object.class));
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderRescheduled r
+                && r.previousPickupAt().equals(before) && r.pickupAt().equals(pickupAt)));
+    }
+
+    @Test
+    void staleOrdersAreCancelledBySystem() {
+        Order stale = pendingOrder(UUID.randomUUID(), 1);
+        when(orderRepository.findAllByStatusAndCreatedAtBefore(eq(OrderStatus.PENDING), any()))
+                .thenReturn(List.of(stale));
+
+        service.cancelStalePendingOrders(java.time.Duration.ofHours(24));
+
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderCancelled c
+                && c.by() == CancelledBy.SYSTEM && c.reason().startsWith("Automatically cancelled")));
+    }
+
+    @Test
+    void aRefusedTransitionPublishesNothing() {
+        UUID orderId = stubOrder(pendingOrder(UUID.randomUUID(), 1));
+
+        assertThatIllegalStateException().isThrownBy(() -> service.fulfill(orderId));
+        assertThatIllegalStateException().isThrownBy(() -> service.cancel(orderId, "no"));
+
+        verifyNoInteractions(events);
     }
 
     // ---- helpers ----

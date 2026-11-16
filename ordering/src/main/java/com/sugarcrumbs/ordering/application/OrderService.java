@@ -5,6 +5,14 @@ import com.sugarcrumbs.catalog.ItemSnapshot;
 import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
+import com.sugarcrumbs.ordering.OrderCancelled;
+import com.sugarcrumbs.ordering.OrderCancelled.CancelledBy;
+import com.sugarcrumbs.ordering.OrderConfirmed;
+import com.sugarcrumbs.ordering.OrderEvent;
+import com.sugarcrumbs.ordering.OrderFulfilled;
+import com.sugarcrumbs.ordering.OrderPlaced;
+import com.sugarcrumbs.ordering.OrderRejected;
+import com.sugarcrumbs.ordering.OrderRescheduled;
 import com.sugarcrumbs.ordering.config.OrderProperties;
 import com.sugarcrumbs.ordering.domain.GuestContact;
 import com.sugarcrumbs.ordering.domain.Order;
@@ -17,6 +25,7 @@ import com.sugarcrumbs.ordering.persistence.WorkingHoursRepository;
 import com.sugarcrumbs.ordering.web.dto.CheckoutRequest;
 import com.sugarcrumbs.ordering.web.dto.DayAvailabilityResponse;
 import com.sugarcrumbs.ordering.web.dto.OrderLineRequest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -36,6 +45,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Orders from checkout to pickup. Every lifecycle change publishes its {@link OrderEvent} inside
+ * the same transaction, so listeners that wait for commit see exactly the changes that stuck.
+ */
 @Service
 @Transactional
 public class OrderService {
@@ -52,16 +65,18 @@ public class OrderService {
     private final AvailabilityService availabilityService;
     private final OwnerApi ownerApi;
     private final OrderProperties properties;
+    private final ApplicationEventPublisher events;
 
     public OrderService(OrderRepository orderRepository, WorkingHoursRepository workingHoursRepository,
                         CatalogApi catalogApi, AvailabilityService availabilityService, OwnerApi ownerApi,
-                        OrderProperties properties) {
+                        OrderProperties properties, ApplicationEventPublisher events) {
         this.orderRepository = orderRepository;
         this.workingHoursRepository = workingHoursRepository;
         this.catalogApi = catalogApi;
         this.availabilityService = availabilityService;
         this.ownerApi = ownerApi;
         this.properties = properties;
+        this.events = events;
     }
 
     /**
@@ -117,6 +132,8 @@ public class OrderService {
         for (OrderLine line : saved.getLines()) {
             catalogApi.reserveStock(line.getItemId(), line.getQuantity());
         }
+        publish(new OrderPlaced(saved.getId(), saved.getReference(), saved.getPickupAt(), saved.getSubtotal(),
+                Instant.now()));
         return saved;
     }
 
@@ -147,6 +164,7 @@ public class OrderService {
     public Order confirm(UUID id) {
         Order order = getOrThrow(id);
         order.confirm();
+        publish(new OrderConfirmed(order.getId(), order.getReference(), order.getPickupAt(), Instant.now()));
         return order;
     }
 
@@ -159,6 +177,7 @@ public class OrderService {
     public Order fulfill(UUID id) {
         Order order = getOrThrow(id);
         order.fulfill();
+        publish(new OrderFulfilled(order.getId(), order.getReference(), Instant.now()));
         return order;
     }
 
@@ -171,6 +190,7 @@ public class OrderService {
         Order order = getOrThrow(id);
         order.reject(reason);
         releaseStock(order);
+        publish(new OrderRejected(order.getId(), order.getReference(), order.getRejectionReason(), Instant.now()));
         return order;
     }
 
@@ -187,6 +207,7 @@ public class OrderService {
         }
         order.cancel(reason);
         releaseStock(order);
+        publishCancelled(order, CancelledBy.OWNER);
         return order;
     }
 
@@ -265,7 +286,11 @@ public class OrderService {
         requireFuture(newPickupAt);
         Order order = getOrThrow(id);
         ensureSlotIsBookable(newPickupAt, order.getId());
+        Instant previous = order.getPickupAt();
         order.reschedule(newPickupAt);
+        if (!previous.equals(newPickupAt)) {
+            publish(new OrderRescheduled(order.getId(), order.getReference(), previous, newPickupAt, Instant.now()));
+        }
         return order;
     }
 
@@ -280,6 +305,7 @@ public class OrderService {
         for (Order order : stale) {
             order.cancel("Automatically cancelled: not confirmed within the hold window");
             releaseStock(order);
+            publishCancelled(order, CancelledBy.SYSTEM);
         }
         return stale.size();
     }
@@ -350,6 +376,15 @@ public class OrderService {
             }
         }
         throw new IllegalStateException("could not generate a unique order reference");
+    }
+
+    private void publishCancelled(Order order, CancelledBy by) {
+        publish(new OrderCancelled(order.getId(), order.getReference(), by, order.getCancellationReason(),
+                Instant.now()));
+    }
+
+    private void publish(OrderEvent event) {
+        events.publishEvent(event);
     }
 
     /** Lines whose item no longer exists in the catalog are left out: there is no stock to move. */
