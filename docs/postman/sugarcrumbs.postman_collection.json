@@ -2496,6 +2496,47 @@
       "description": "Guest orders and the owner's accept/reject workflow."
     },
     {
+      "name": "Dashboard (owner)",
+      "item": [
+        {
+          "name": "Production list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/production?date={{tomorrow}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "production"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{tomorrow}}"
+                }
+              ]
+            },
+            "description": "Units per item to bake for one day's pickups (confirmed and in-progress orders). `date` is a day in the bakery's time zone; today if left out."
+          }
+        }
+      ]
+    },
+    {
       "name": "Cleanup checks",
       "description": "Runs last. Data from the run stays in the DB: booked items can't be deleted yet (#14).",
       "item": [

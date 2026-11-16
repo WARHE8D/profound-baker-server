@@ -29,6 +29,24 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecific
 
     boolean existsByReference(String reference);
 
+    /**
+     * What has to be made for pickups in {@code [from, to)}: units per item across orders in the
+     * given statuses, summed in the database so a busy day is still one small result.
+     */
+    @Query("""
+            select new com.sugarcrumbs.ordering.persistence.ProductionRow(
+                       l.itemId, l.itemName, sum(l.quantity), count(distinct o.id))
+              from OrderLine l join l.order o
+             where o.status in :statuses and o.pickupAt >= :from and o.pickupAt < :to
+             group by l.itemId, l.itemName
+            """)
+    List<ProductionRow> production(@Param("from") Instant from, @Param("to") Instant to,
+                                   @Param("statuses") Collection<OrderStatus> statuses);
+
+    /** How many orders in the given statuses are picked up in {@code [from, to)}. */
+    long countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusIn(
+            Instant from, Instant to, Collection<OrderStatus> statuses);
+
     /** The order a guest's magic link points at, by the token's hash (unique). */
     Optional<Order> findByAccessTokenHash(String accessTokenHash);
 

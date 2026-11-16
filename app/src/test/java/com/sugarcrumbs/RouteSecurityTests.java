@@ -70,6 +70,7 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "PATCH,  /api/invoices/" + ID + "/discount",
             "PATCH,  /api/invoices/" + ID + "/pay",
             "PATCH,  /api/invoices/" + ID + "/refund",
+            "GET,    /api/dashboard/production",
             "GET,    /api/catalogue/items",
             "GET,    /api/catalogue/items/" + ID,
             "POST,   /api/catalogue/items",
