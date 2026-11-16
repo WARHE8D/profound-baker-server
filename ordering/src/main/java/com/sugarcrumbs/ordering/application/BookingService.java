@@ -154,7 +154,7 @@ public class BookingService {
                 .anyMatch(slot -> slot.startTime().equals(time) && slot.bookable());
         if (!matchesBookableSlot) {
             throw new ConflictException(
-                    "the requested time is not an available booking slot — check GET /api/availability first");
+                    "the requested time is not an available booking slot — check GET /api/public/availability first");
         }
     }
 

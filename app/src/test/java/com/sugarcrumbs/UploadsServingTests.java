@@ -88,7 +88,7 @@ class UploadsServingTests extends AbstractIntegrationTest {
         assertThat(file).exists();
 
         ResponseEntity<Map> removed = http.delete()
-                .uri(uriBuilder -> uriBuilder.path("/api/items/{id}/images").queryParam("url", url).build(itemId))
+                .uri(uriBuilder -> uriBuilder.path("/api/catalogue/items/{id}/images").queryParam("url", url).build(itemId))
                 .retrieve().toEntity(Map.class);
         assertThat(removed.getStatusCode().value()).isEqualTo(200);
         assertThat((List<?>) removed.getBody().get("imageUrls")).isEmpty();
@@ -104,7 +104,7 @@ class UploadsServingTests extends AbstractIntegrationTest {
         Path file = tempDir.resolve("uploads").resolve(url.substring("/uploads/".length()));
         assertThat(file).exists();
 
-        int status = http.delete().uri("/api/items/{id}", itemId).retrieve().toBodilessEntity().getStatusCode().value();
+        int status = http.delete().uri("/api/catalogue/items/{id}", itemId).retrieve().toBodilessEntity().getStatusCode().value();
 
         assertThat(status).isEqualTo(204);
         assertThat(file).doesNotExist();
@@ -132,11 +132,11 @@ class UploadsServingTests extends AbstractIntegrationTest {
     }
 
     private String createItem() {
-        Map<?, ?> category = http.post().uri("/api/categories")
+        Map<?, ?> category = http.post().uri("/api/catalogue/categories")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("name", "Breads " + System.nanoTime()))
                 .retrieve().body(Map.class);
-        Map<?, ?> item = http.post().uri("/api/items")
+        Map<?, ?> item = http.post().uri("/api/catalogue/items")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("name", "Sourdough", "price", "6.50", "categoryId", category.get("id"), "leadTimeHours", 0))
                 .retrieve().body(Map.class);
@@ -150,7 +150,7 @@ class UploadsServingTests extends AbstractIntegrationTest {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new HttpEntity<>(new ByteArrayResource(PNG), partHeaders));
 
-        Map<?, ?> item = http.post().uri("/api/items/{id}/images/upload", itemId)
+        Map<?, ?> item = http.post().uri("/api/catalogue/items/{id}/images/upload", itemId)
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(body)
                 .retrieve().body(Map.class);

@@ -20,8 +20,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Route security matrix (CLAUDE.md §8): every owner route rejects anonymous
  * callers with a 401 {@code ApiError}, and lets the Owner through; the
- * shopper-facing routes stay public. Paths are the current ones; #13 moves the
- * public surface under {@code /api/public/**} and extends this matrix.
+ * shopper surface under {@code /api/public/**} stays public, read-only apart
+ * from guest checkout.
  *
  * <p>"Let through" means the response is neither 401 nor 403: the request
  * bodies here are deliberately empty, so a 400/404 just proves the request got
@@ -61,18 +61,21 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "PATCH,  /api/bookings/" + ID + "/fulfill",
             "PATCH,  /api/bookings/" + ID + "/cancel",
             "PUT,    /api/bookings/" + ID + "/schedule",
-            "POST,   /api/items",
-            "PUT,    /api/items/" + ID,
-            "PATCH,  /api/items/" + ID + "/availability",
-            "PATCH,  /api/items/" + ID + "/stock",
-            "PATCH,  /api/items/" + ID + "/price",
-            "POST,   /api/items/" + ID + "/images",
-            "POST,   /api/items/" + ID + "/images/upload",
-            "DELETE, /api/items/" + ID + "/images",
-            "DELETE, /api/items/" + ID,
-            "POST,   /api/categories",
-            "PUT,    /api/categories/" + ID,
-            "DELETE, /api/categories/" + ID,
+            "GET,    /api/catalogue/items",
+            "GET,    /api/catalogue/items/" + ID,
+            "POST,   /api/catalogue/items",
+            "PUT,    /api/catalogue/items/" + ID,
+            "PATCH,  /api/catalogue/items/" + ID + "/availability",
+            "PATCH,  /api/catalogue/items/" + ID + "/stock",
+            "PATCH,  /api/catalogue/items/" + ID + "/price",
+            "POST,   /api/catalogue/items/" + ID + "/images",
+            "POST,   /api/catalogue/items/" + ID + "/images/upload",
+            "DELETE, /api/catalogue/items/" + ID + "/images",
+            "DELETE, /api/catalogue/items/" + ID,
+            "GET,    /api/catalogue/categories",
+            "POST,   /api/catalogue/categories",
+            "PUT,    /api/catalogue/categories/" + ID,
+            "DELETE, /api/catalogue/categories/" + ID,
             "GET,    /api/availability/working-hours",
             "PUT,    /api/availability/working-hours/MONDAY",
             "DELETE, /api/availability/working-hours/MONDAY",
@@ -85,6 +88,12 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "GET,    /api/owner/profile",
             "PUT,    /api/owner/profile",
             "POST,   /api/owner/password",
+            // The old public paths are gone, and the public prefix allows no other writes.
+            "GET,    /api/items",
+            "POST,   /api/bookings",
+            "PUT,    /api/public/catalogue/items/" + ID,
+            "DELETE, /api/public/catalogue/items/" + ID,
+            "POST,   /api/public/availability",
             // Default deny: a path nobody mapped is still behind authentication.
             "GET,    /api/not-a-route",
     })
@@ -102,11 +111,11 @@ class RouteSecurityTests extends AbstractIntegrationTest {
 
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource({
-            "GET,  /api/items",
-            "GET,  /api/items/" + ID,
-            "GET,  /api/categories",
-            "GET,  /api/availability?from=2026-12-01&to=2026-12-02",
-            "POST, /api/bookings",
+            "GET,  /api/public/catalogue/items",
+            "GET,  /api/public/catalogue/items/" + ID,
+            "GET,  /api/public/catalogue/categories",
+            "GET,  /api/public/availability?from=2026-12-01&to=2026-12-02",
+            "POST, /api/public/orders",
             "POST, /api/auth/login",
             "POST, /api/auth/refresh",
             "GET,  /.well-known/jwks.json",

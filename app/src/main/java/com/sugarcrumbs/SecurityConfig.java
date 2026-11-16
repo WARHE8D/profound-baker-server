@@ -22,10 +22,10 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code ROLE_OWNER} (issued by the identity module's {@code /api/auth/login}),
  * validated by identity's {@code JwtDecoder} bean.
  *
- * <p>Default deny: anything not listed as public needs the Owner. Until #13
- * moves the public surface under {@code /api/public/**}, the shopper-facing
- * reads (items, categories, availability) and guest checkout
- * ({@code POST /api/bookings}) stay public at their current paths.
+ * <p>Default deny: anything not listed as public needs the Owner. The shopper
+ * surface lives under {@code /api/public/**}: read-only, except guest checkout
+ * ({@code POST /api/public/orders}), which is validated and rate-limited
+ * ({@link RateLimitFilter}). CORS comes from {@link WebEdgeConfig}.
  *
  * <p>401/403 are handed to the MVC exception resolver, so they get the same
  * {@code ApiError} body as every other error ({@code GlobalExceptionHandler}).
@@ -56,13 +56,14 @@ class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .requestCache(AbstractHttpConfigurer::disable)
                 .anonymous(Customizer.withDefaults())
+                // Uses WebEdgeConfig's CorsConfigurationSource; answers preflights before authorization.
+                .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.GET, "/.well-known/jwks.json").permitAll()
-                        // Shopper-facing reads and guest checkout; moved under /api/public/** in #13.
-                        .requestMatchers(HttpMethod.GET, "/api/items", "/api/items/*", "/api/categories",
-                                "/api/availability").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/bookings").permitAll()
+                        // The shopper surface: public reads, and guest checkout as its only write.
+                        .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/public/orders").permitAll()
                         // Image files (Caddy serves them directly in prod) and API docs.
                         .requestMatchers(HttpMethod.GET, "/uploads/**", "/v3/api-docs/**", "/swagger-ui/**",
                                 "/swagger-ui.html").permitAll()

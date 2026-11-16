@@ -22,8 +22,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/** The Owner's category management. Shoppers read categories through {@link PublicCatalogueController}. */
 @RestController
-@RequestMapping("/api/categories")
+@RequestMapping("/api/catalogue/categories")
 public class CategoryController {
 
     private final CategoryService categoryService;
@@ -38,7 +39,7 @@ public class CategoryController {
     public ResponseEntity<CategoryResponse> create(@Valid @RequestBody CategoryRequest request,
                                                    UriComponentsBuilder uriBuilder) {
         Category created = categoryService.create(request);
-        URI location = uriBuilder.path("/api/categories/{id}").buildAndExpand(created.getId()).toUri();
+        URI location = uriBuilder.path("/api/catalogue/categories/{id}").buildAndExpand(created.getId()).toUri();
         return ResponseEntity.created(location).body(categoryMapper.toResponse(created));
     }
 

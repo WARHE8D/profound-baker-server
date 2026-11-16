@@ -36,7 +36,7 @@ import java.util.UUID;
  * distinct, intent-revealing HTTP operation.
  */
 @RestController
-@RequestMapping("/api/items")
+@RequestMapping("/api/catalogue/items")
 public class ItemController {
 
     private final ItemService itemService;
@@ -51,7 +51,7 @@ public class ItemController {
     public ResponseEntity<ItemResponse> create(@Valid @RequestBody ItemRequest request,
                                                UriComponentsBuilder uriBuilder) {
         Item created = itemService.create(request);
-        URI location = uriBuilder.path("/api/items/{id}").buildAndExpand(created.getId()).toUri();
+        URI location = uriBuilder.path("/api/catalogue/items/{id}").buildAndExpand(created.getId()).toUri();
         return ResponseEntity.created(location).body(itemMapper.toResponse(created));
     }
 
@@ -60,7 +60,7 @@ public class ItemController {
         return itemMapper.toResponse(itemService.getOrThrow(id));
     }
 
-    /** All filters optional: /api/items?categoryId=..&available=true&search=cake&page=0&size=20&sort=name,asc */
+    /** All filters optional: /api/catalogue/items?categoryId=..&available=true&search=cake&page=0&size=20&sort=name,asc */
     @GetMapping
     public Page<ItemResponse> search(
             @RequestParam(required = false) UUID categoryId,

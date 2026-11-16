@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "SugarCrumbs API (local)",
-    "description": "Local API for the SugarCrumbs baker backend (modular monolith on branch refactor/modular-monolith).\n\n**No auth yet**: every endpoint is open until #10 lands.\n\n**Suggested order:** Catalog \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Bookings \u2192 Create booking \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, bookingId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Booking times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, booked item and bookings in the DB: booked items can't be deleted until #14.",
+    "description": "Local API for the SugarCrumbs baker backend (modular monolith).\n\n**Auth:** run *Auth \u2192 Log in* first (set `ownerEmail`/`ownerPassword` to your `APP_OWNER_EMAIL`/`APP_OWNER_INITIAL_PASSWORD`). Owner routes need the saved Bearer token; shopper routes live under `/api/public/**` and need none. Login is rate-limited to 5 per minute per IP, guest checkout to 10 per 10 minutes.\n\n**Suggested order:** Auth \u2192 Log in; Catalogue \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Bookings \u2192 Guest checkout \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, bookingId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Booking times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, booked item and bookings in the DB: booked items can't be deleted until #14.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -72,11 +72,171 @@
     {
       "key": "rescheduleAt",
       "value": ""
+    },
+    {
+      "key": "ownerEmail",
+      "value": "owner@example.com"
+    },
+    {
+      "key": "ownerPassword",
+      "value": "change-me-on-first-login"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "refreshToken",
+      "value": ""
     }
   ],
   "item": [
     {
-      "name": "Catalog (front page items)",
+      "name": "Auth (run first)",
+      "description": "Log in as the Owner. The access token is saved to `accessToken`, which every request sends as a Bearer token (collection auth). It lasts 15 minutes: run **Refresh** (or Log in again) when requests start returning 401. Public requests ignore the header.",
+      "item": [
+        {
+          "name": "Log in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{ownerPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh tokens",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', body.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Who am I",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Owner profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "owner",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Catalogue (owner)",
       "item": [
         {
           "name": "Categories",
@@ -98,12 +258,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/categories",
+                  "raw": "{{baseUrl}}/api/catalogue/categories",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "categories"
                   ]
                 }
@@ -135,12 +296,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/categories",
+                  "raw": "{{baseUrl}}/api/catalogue/categories",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "categories"
                   ]
                 },
@@ -178,12 +340,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/categories/{{categoryId}}",
+                  "raw": "{{baseUrl}}/api/catalogue/categories/{{categoryId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "categories",
                     "{{categoryId}}"
                   ]
@@ -225,12 +388,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/categories",
+                  "raw": "{{baseUrl}}/api/catalogue/categories",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "categories"
                   ]
                 },
@@ -263,12 +427,13 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/categories/{{tmpCategoryId}}",
+                  "raw": "{{baseUrl}}/api/catalogue/categories/{{tmpCategoryId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "categories",
                     "{{tmpCategoryId}}"
                   ]
@@ -298,12 +463,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items?categoryId={{categoryId}}&available=true&search=cake&page=0&size=20&sort=name,asc",
+                  "raw": "{{baseUrl}}/api/catalogue/items?categoryId={{categoryId}}&available=true&search=cake&page=0&size=20&sort=name,asc",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items"
                   ],
                   "query": [
@@ -369,12 +535,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items",
+                  "raw": "{{baseUrl}}/api/catalogue/items",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items"
                   ]
                 },
@@ -407,12 +574,13 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}"
                   ]
@@ -441,12 +609,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}"
                   ]
@@ -484,12 +653,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/availability",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/availability",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "availability"
@@ -529,12 +699,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/stock",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/stock",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "stock"
@@ -574,12 +745,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/price",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/price",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "price"
@@ -618,12 +790,13 @@
                   }
                 ],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/images",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "images"
@@ -657,12 +830,13 @@
                 "method": "POST",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images/upload",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/images/upload",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "images",
@@ -699,12 +873,13 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}/images?url=https://example.com/cinnamon-roll.jpg",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}/images?url=https://example.com/cinnamon-roll.jpg",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}",
                     "images"
@@ -735,12 +910,13 @@
                 "method": "DELETE",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/api/items/{{itemId}}",
+                  "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}",
                   "host": [
                     "{{baseUrl}}"
                   ],
                   "path": [
                     "api",
+                    "catalogue",
                     "items",
                     "{{itemId}}"
                   ]
@@ -752,6 +928,104 @@
         }
       ],
       "description": "Owner-managed items shown on the storefront."
+    },
+    {
+      "name": "Storefront (public)",
+      "description": "What shoppers see: no token, only available items, no stock counts.",
+      "item": [
+        {
+          "name": "Browse items",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/catalogue/items?categoryId={{categoryId}}&search=cake&page=0&size=20&sort=price,asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "catalogue",
+                "items"
+              ],
+              "query": [
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}"
+                },
+                {
+                  "key": "search",
+                  "value": "cake"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "price,asc"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "View item",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/catalogue/items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "catalogue",
+                "items",
+                "{{itemId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List categories",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/catalogue/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "catalogue",
+                "categories"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     },
     {
       "name": "Availability",
@@ -773,12 +1047,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/availability?date={{tomorrow}}",
+              "raw": "{{baseUrl}}/api/public/availability?date={{tomorrow}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
+                "public",
                 "availability"
               ],
               "query": [
@@ -808,12 +1083,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/availability?from={{tomorrow}}&to={{nextWeek}}",
+              "raw": "{{baseUrl}}/api/public/availability?from={{tomorrow}}&to={{nextWeek}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
+                "public",
                 "availability"
               ],
               "query": [
@@ -1126,12 +1402,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/items",
+              "raw": "{{baseUrl}}/api/catalogue/items",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
+                "catalogue",
                 "items"
               ]
             },
@@ -1148,7 +1425,7 @@
           }
         },
         {
-          "name": "Create booking (guest checkout)",
+          "name": "Guest checkout",
           "event": [
             {
               "listen": "prerequest",
@@ -1158,7 +1435,7 @@
                   "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
                   "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
                   "const v = k => pm.collectionVariables.get(k);",
-                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "pm.sendRequest(`${v('baseUrl')}/api/public/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
                   "    if (err) { throw err; }",
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
@@ -1196,13 +1473,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings",
+              "raw": "{{baseUrl}}/api/public/orders",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings"
+                "public",
+                "orders"
               ]
             },
             "body": {
@@ -1397,7 +1675,7 @@
           }
         },
         {
-          "name": "Create booking to reschedule and cancel",
+          "name": "Guest checkout to reschedule and cancel",
           "event": [
             {
               "listen": "prerequest",
@@ -1407,7 +1685,7 @@
                   "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
                   "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
                   "const v = k => pm.collectionVariables.get(k);",
-                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "pm.sendRequest(`${v('baseUrl')}/api/public/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
                   "    if (err) { throw err; }",
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
@@ -1445,13 +1723,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings",
+              "raw": "{{baseUrl}}/api/public/orders",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings"
+                "public",
+                "orders"
               ]
             },
             "body": {
@@ -1477,7 +1756,7 @@
                   "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
                   "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
                   "const v = k => pm.collectionVariables.get(k);",
-                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "pm.sendRequest(`${v('baseUrl')}/api/public/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
                   "    if (err) { throw err; }",
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
@@ -1579,7 +1858,7 @@
           }
         },
         {
-          "name": "Create booking to reject",
+          "name": "Guest checkout to reject",
           "event": [
             {
               "listen": "prerequest",
@@ -1589,7 +1868,7 @@
                   "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
                   "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
                   "const v = k => pm.collectionVariables.get(k);",
-                  "pm.sendRequest(`${v('baseUrl')}/api/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "pm.sendRequest(`${v('baseUrl')}/api/public/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
                   "    if (err) { throw err; }",
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
@@ -1627,13 +1906,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings",
+              "raw": "{{baseUrl}}/api/public/orders",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings"
+                "public",
+                "orders"
               ]
             },
             "body": {
@@ -1717,12 +1997,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/items/{{itemId}}",
+              "raw": "{{baseUrl}}/api/catalogue/items/{{itemId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
+                "catalogue",
                 "items",
                 "{{itemId}}"
               ]
@@ -1747,12 +2028,13 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/categories/{{categoryId}}",
+              "raw": "{{baseUrl}}/api/catalogue/categories/{{categoryId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
+                "catalogue",
                 "categories",
                 "{{categoryId}}"
               ]
@@ -1796,5 +2078,15 @@
         }
       ]
     }
-  ]
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  }
 }
