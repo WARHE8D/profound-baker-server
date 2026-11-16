@@ -31,6 +31,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -42,8 +44,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Orders from checkout to pickup. Every lifecycle change publishes its {@link OrderEvent} inside
@@ -55,6 +59,10 @@ public class OrderService {
 
     /** A clash among 33.5M references is already rare; several in a row means something is broken. */
     private static final int REFERENCE_ATTEMPTS = 5;
+
+    /** Never mentions the token: it would end up in a log line or a screenshot. */
+    private static final Supplier<NotFoundException> NOT_FOUND_BY_TOKEN =
+            () -> new NotFoundException("no order found for this link; it may have expired");
 
     /** Longer than any reference, name, email or phone it could match. */
     static final int MAX_SEARCH_LENGTH = 100;
@@ -299,6 +307,74 @@ public class OrderService {
         order.reschedule(newPickupAt);
         if (!previous.equals(newPickupAt)) {
             publish(new OrderRescheduled(order.getId(), order.getReference(), previous, newPickupAt, Instant.now()));
+        }
+        return order;
+    }
+
+    // ---- The guest's magic link (#19) ----
+
+    /**
+     * The order a guest's magic link opens. Every way a link can fail (malformed, unknown,
+     * expired, from before links existed) is the same 404, so a caller learns nothing about
+     * which tokens or orders exist.
+     *
+     * @throws NotFoundException (404) unless {@code token} opens an order right now
+     */
+    @Transactional(readOnly = true)
+    public Order findByAccessToken(String token) {
+        return openByAccessToken(token);
+    }
+
+    /**
+     * The guest calls their order off: only while it is pending or confirmed, and no later than
+     * {@code app.order.guest-cancel-cutoff-hours} before pickup. Releases its slot and stock.
+     *
+     * @throws NotFoundException (404) unless {@code token} opens an order right now
+     * @throws ConflictException (409) if the order is past the point a guest may cancel it
+     */
+    public Order cancelByGuest(String token, String reason) {
+        Order order = openByAccessToken(token);
+        Instant until = guestCancellableUntil(order).orElseThrow(() -> new ConflictException(
+                "an order in status " + order.getStatus() + " can no longer be cancelled online"));
+        if (!Instant.now().isBefore(until)) {
+            throw new ConflictException("online cancellation closes " + properties.guestCancelCutoffHours()
+                    + " hours before pickup; please contact the bakery");
+        }
+        order.cancel(reason == null || reason.isBlank() ? "Cancelled by the guest" : reason.strip());
+        releaseStock(order);
+        publishCancelled(order, CancelledBy.GUEST);
+        return order;
+    }
+
+    /** See {@link Order#guestCancellableUntil}; the cutoff is {@code app.order.guest-cancel-cutoff-hours}. */
+    public Optional<Instant> guestCancellableUntil(Order order) {
+        return order.guestCancellableUntil(Duration.ofHours(properties.guestCancelCutoffHours()));
+    }
+
+    /**
+     * Invoked by {@code ExpiredAccessTokenPurgeJob}.
+     *
+     * @return how many orders' links were forgotten
+     */
+    public int purgeExpiredAccessTokens() {
+        return orderRepository.purgeExpiredAccessTokens(Instant.now());
+    }
+
+    /**
+     * Looks the order up by the token's hash (the index does the finding), then compares the
+     * hashes again in constant time, so even the final check takes the same time however many
+     * characters match.
+     */
+    private Order openByAccessToken(String token) {
+        if (token == null || !GuestAccessTokens.looksLikeAToken(token)) {
+            throw NOT_FOUND_BY_TOKEN.get();
+        }
+        String hash = accessTokens.hash(token);
+        Order order = orderRepository.findByAccessTokenHash(hash).orElseThrow(NOT_FOUND_BY_TOKEN);
+        boolean sameHash = MessageDigest.isEqual(hash.getBytes(StandardCharsets.US_ASCII),
+                order.getAccessTokenHash().getBytes(StandardCharsets.US_ASCII));
+        if (!sameHash || !order.isAccessTokenValid(Instant.now())) {
+            throw NOT_FOUND_BY_TOKEN.get();
         }
         return order;
     }

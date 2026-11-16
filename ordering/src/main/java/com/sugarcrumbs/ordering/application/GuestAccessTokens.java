@@ -8,6 +8,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.regex.Pattern;
 
 /**
  * The secret in a guest's magic link (#18): 32 random bytes, handed out base64url-encoded once
@@ -23,6 +24,9 @@ public class GuestAccessTokens {
 
     static final int TOKEN_BYTES = 32;
 
+    /** 32 bytes in unpadded base64url. */
+    private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9_-]{43}");
+
     private final SecureRandom random = new SecureRandom();
 
     /** A new token as it goes in the link: 43 URL-safe characters. */
@@ -30,6 +34,11 @@ public class GuestAccessTokens {
         byte[] bytes = new byte[TOKEN_BYTES];
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /** A cheap shape check, so garbage in a URL is turned away before hashing or a database lookup. */
+    public static boolean looksLikeAToken(String candidate) {
+        return TOKEN.matcher(candidate).matches();
     }
 
     /** The 64-character hex SHA-256 of {@code token}: what the database stores and looks up. */

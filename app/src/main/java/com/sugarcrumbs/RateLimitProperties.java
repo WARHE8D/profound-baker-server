@@ -15,12 +15,14 @@ import java.time.Duration;
 record RateLimitProperties(
         @DefaultValue("true") boolean enabled,
         @DefaultValue Limit login,
-        @DefaultValue Limit checkout
+        @DefaultValue Limit checkout,
+        @DefaultValue Limit magicLink
 ) {
 
     RateLimitProperties {
         login = login.orDefault(5, Duration.ofMinutes(1));
         checkout = checkout.orDefault(10, Duration.ofMinutes(10));
+        magicLink = magicLink.orDefault(30, Duration.ofMinutes(10));
     }
 
     /** {@code capacity} requests per {@code period}; unset fields take the policy's default. */

@@ -3,6 +3,7 @@ package com.sugarcrumbs.ordering.application;
 import com.sugarcrumbs.catalog.CatalogApi;
 import com.sugarcrumbs.catalog.ItemSnapshot;
 import com.sugarcrumbs.common.exception.ConflictException;
+import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.OwnerSettings;
 import com.sugarcrumbs.ordering.OrderCancelled;
@@ -74,10 +75,13 @@ import static org.mockito.Mockito.when;
  * <p>Domain events (#17): each lifecycle change publishes its event, and a refused one publishes
  * nothing. That listeners only see committed changes is shown against Postgres by
  * {@code OrderEventsTests} in {@code app}.
+ *
+ * <p>The guest's magic link (#19): every failed lookup is the same 404, and a guest may cancel
+ * only a pending or confirmed order, up to the cutoff before pickup.
  */
 class OrderServiceTests {
 
-    private static final OrderProperties LIMITS = new OrderProperties(24, 3, 5);
+    private static final OrderProperties LIMITS = new OrderProperties(24, 3, 5, 24);
 
     private final OrderRepository orderRepository = mock(OrderRepository.class);
     private final WorkingHoursRepository workingHoursRepository = mock(WorkingHoursRepository.class);
@@ -355,7 +359,85 @@ class OrderServiceTests {
         verifyNoInteractions(events);
     }
 
+    @Test
+    void aMalformedTokenIs404WithoutTouchingTheDatabase() {
+        for (String token : new String[] {"", "short", "x".repeat(44), "!".repeat(43)}) {
+            assertThatThrownBy(() -> service.findByAccessToken(token)).isInstanceOf(NotFoundException.class);
+        }
+        verifyNoInteractions(orderRepository);
+    }
+
+    @Test
+    void anUnknownTokenIs404AndTheMessageNeverEchoesIt() {
+        String token = tokens.newToken();
+        when(orderRepository.findByAccessTokenHash(tokens.hash(token))).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.findByAccessToken(token))
+                .isInstanceOf(NotFoundException.class)
+                .message().doesNotContain(token);
+    }
+
+    @Test
+    void aValidTokenOpensItsOrder() {
+        String token = tokens.newToken();
+        Order order = pendingOrder(UUID.randomUUID(), 1);
+        order.issueAccessToken(tokens.hash(token));
+        when(orderRepository.findByAccessTokenHash(tokens.hash(token))).thenReturn(Optional.of(order));
+
+        assertThat(service.findByAccessToken(token)).isSameAs(order);
+    }
+
+    @Test
+    void aGuestCancelsBeforeTheCutoffAndGetsTheSlotAndStockBack() {
+        UUID bread = UUID.randomUUID();
+        Order order = guestOrder(bread, pickupAt.plus(2, ChronoUnit.DAYS));
+        String token = stubToken(order);
+
+        service.cancelByGuest(token, null);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(order.getCancellationReason()).isEqualTo("Cancelled by the guest");
+        verify(catalogApi).releaseStock(bread, 1);
+        verify(events).publishEvent(argThat((Object e) -> e instanceof OrderCancelled c && c.by() == CancelledBy.GUEST));
+    }
+
+    @Test
+    void insideTheCutoffAGuestCannotCancel() {
+        Order order = guestOrder(UUID.randomUUID(), Instant.now().plus(23, ChronoUnit.HOURS));
+        String token = stubToken(order);
+
+        assertThatThrownBy(() -> service.cancelByGuest(token, "late"))
+                .isInstanceOf(ConflictException.class).hasMessageContaining("24 hours before pickup");
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+        verifyNoInteractions(events);
+    }
+
+    @Test
+    void onceBakingHasStartedAGuestCannotCancel() {
+        Order order = guestOrder(UUID.randomUUID(), pickupAt.plus(5, ChronoUnit.DAYS));
+        order.confirm();
+        order.startPreparation();
+        String token = stubToken(order);
+
+        assertThatThrownBy(() -> service.cancelByGuest(token, null)).isInstanceOf(ConflictException.class);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.IN_PROGRESS);
+    }
+
     // ---- helpers ----
+
+    private Order guestOrder(UUID itemId, Instant pickup) {
+        return Order.builder().reference("SC-7F3K2").pickupAt(pickup)
+                .guestContact(new GuestContact("Ada", "ada@example.com", "+1 555 0100"))
+                .line(itemId, "Bread", new BigDecimal("5.00"), 1)
+                .build();
+    }
+
+    private String stubToken(Order order) {
+        String token = tokens.newToken();
+        order.issueAccessToken(tokens.hash(token));
+        when(orderRepository.findByAccessTokenHash(tokens.hash(token))).thenReturn(Optional.of(order));
+        return token;
+    }
 
     private Order pendingOrder(UUID itemId, int quantity) {
         return Order.builder().reference("SC-7F3K2").pickupAt(pickupAt)

@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -47,6 +48,9 @@ public class Order extends BaseEntity {
     public static final Duration ACCESS_AFTER_FINAL = Duration.ofDays(30);
 
     private static final Pattern TOKEN_HASH = Pattern.compile("[0-9a-f]{64}");
+
+    private static final Set<OrderStatus> GUEST_CANCELLABLE_FROM =
+            EnumSet.of(OrderStatus.PENDING, OrderStatus.CONFIRMED);
 
     private static final Set<OrderStatus> CANCELLABLE_FROM =
             EnumSet.of(OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.IN_PROGRESS);
@@ -131,6 +135,18 @@ public class Order extends BaseEntity {
     /** Whether the guest's link still opens this order at {@code now}. Orders from before links never do. */
     public boolean isAccessTokenValid(Instant now) {
         return accessTokenHash != null && (accessTokenExpiresAt == null || now.isBefore(accessTokenExpiresAt));
+    }
+
+    /**
+     * Until when the guest may cancel through their link: {@code cutoff} before pickup, and only
+     * while the order is pending or confirmed (once baking starts, it's a conversation with the
+     * baker). Empty when guest cancellation is already off the table whatever the time.
+     */
+    public Optional<Instant> guestCancellableUntil(Duration cutoff) {
+        if (!GUEST_CANCELLABLE_FROM.contains(status)) {
+            return Optional.empty();
+        }
+        return Optional.of(pickupAt.minus(cutoff));
     }
 
     /** Called on every move into a final state: the guest keeps their link for a while to see how it ended. */

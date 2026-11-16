@@ -1498,6 +1498,42 @@
           }
         },
         {
+          "name": "View order (magic link)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('no internal id', () => pm.expect(pm.response.json()).to.not.have.property('id'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/orders/by-token/{{accessToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "orders",
+                "by-token",
+                "{{accessToken}}"
+              ]
+            },
+            "description": "The guest's view of their own order, by the token from checkout. No login. Unknown, malformed or expired tokens are all 404."
+          }
+        },
+        {
           "name": "List orders (owner view)",
           "event": [
             {
@@ -2146,6 +2182,115 @@
               }
             },
             "description": "PENDING \u2192 REJECTED with a required reason. Releases slot capacity and tracked stock."
+          }
+        },
+        {
+          "name": "Guest checkout to cancel by magic link",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Pick the first bookable slot between tomorrow and next week, so repeated runs",
+                  "// don't collide with slots taken by earlier runs (capacity is 1 per slot).",
+                  "const v = k => pm.collectionVariables.get(k);",
+                  "pm.sendRequest(`${v('baseUrl')}/api/public/availability?from=${v('tomorrow')}&to=${v('nextWeek')}`, (err, res) => {",
+                  "    if (err) { throw err; }",
+                  "    for (const day of res.json()) {",
+                  "        const slot = (day.slots || []).find(s => s.bookable);",
+                  "        if (slot) {",
+                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
+                  "            return;",
+                  "        }",
+                  "    }",
+                  "    throw new Error('no bookable slot between tomorrow and next week: set working hours first');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "    pm.collectionVariables.set('accessToken', pm.response.json().accessToken);",
+                  "    console.log('orderId =', pm.collectionVariables.get('orderId'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "orders"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickupAt\": \"{{slotAt}}\",\n  \"lines\": [\n    { \"itemId\": \"{{itemId}}\", \"quantity\": 1 }\n  ],\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Fourth order (PENDING) for the guest to cancel. Saves `orderId` and `accessToken`."
+          }
+        },
+        {
+          "name": "Cancel order (magic link)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('order is CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/orders/by-token/{{accessToken}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "orders",
+                "by-token",
+                "{{accessToken}}",
+                "cancel"
+              ]
+            },
+            "description": "PENDING/CONFIRMED only, up to `app.order.guest-cancel-cutoff-hours` (24) before pickup; 409 after. The body (`{\"reason\": \"...\"}`) is optional."
           }
         }
       ],
