@@ -31,6 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * Checkout rules (#15): configurable limits on lines and units, and no pickup in the past.
  *
+ * Magic link (#18): checkout returns the guest's token once; only its hash is stored.
+ *
  * <p>Each test picks its own pickup day, opened for that weekday with plenty of
  * capacity, so tests never compete for a slot in the shared database.
  */
@@ -217,6 +219,47 @@ class OrderCheckoutTests extends AbstractIntegrationTest {
         assertThat(pastReschedule.getStatusCode().value()).isEqualTo(400);
         Map<String, Object> unchanged = owner.get().uri("/api/orders/{id}", orderId).retrieve().body(Map.class);
         assertThat(unchanged.get("pickupAt")).isEqualTo(day + "T09:00:00Z");
+    }
+
+    @Test
+    void checkoutReturnsAMagicLinkTokenOnceAndStoresOnlyItsHash() throws Exception {
+        String bread = createItem("Token loaf", "3.00", null);
+        LocalDate day = openDay(59);
+
+        Map<String, Object> first = checkout(day, line(bread, 1)).getBody();
+        Map<String, Object> second = checkout(day, line(bread, 1)).getBody();
+
+        String token = (String) first.get("accessToken");
+        assertThat(token).matches("[A-Za-z0-9_-]{43}");
+        assertThat(first).as("order fields sit beside the token, not nested").containsKeys("id", "reference", "lines");
+        assertThat(second.get("accessToken")).isNotEqualTo(token);
+
+        Map<String, Object> stored = jdbc.queryForMap(
+                "SELECT access_token_hash, access_token_expires_at FROM ordering.orders WHERE id = ?::uuid",
+                first.get("id"));
+        byte[] sha256 = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(stored.get("access_token_hash")).isEqualTo(java.util.HexFormat.of().formatHex(sha256));
+        assertThat(stored.get("access_token_expires_at")).isNull();
+
+        Map<String, Object> ownerView = owner.get().uri("/api/orders/{id}", first.get("id")).retrieve().body(Map.class);
+        assertThat(ownerView).doesNotContainKeys("accessToken", "accessTokenHash");
+    }
+
+    @Test
+    void rejectingAnOrderStartsItsLinksThirtyDayExpiry() {
+        String bread = createItem("Expiry loaf", "3.00", null);
+        Object orderId = checkout(openDay(59), line(bread, 1)).getBody().get("id");
+
+        owner.patch().uri("/api/orders/{id}/reject", orderId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("reason", "fully booked"))
+                .retrieve().toBodilessEntity();
+
+        Boolean thirtyDays = jdbc.queryForObject(
+                "SELECT access_token_expires_at BETWEEN now() + interval '29 days 23 hours'"
+                        + " AND now() + interval '30 days' FROM ordering.orders WHERE id = ?::uuid",
+                Boolean.class, orderId);
+        assertThat(thirtyDays).isTrue();
     }
 
     // ---- helpers ----

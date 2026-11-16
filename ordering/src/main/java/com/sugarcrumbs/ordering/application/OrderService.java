@@ -66,10 +66,12 @@ public class OrderService {
     private final OwnerApi ownerApi;
     private final OrderProperties properties;
     private final ApplicationEventPublisher events;
+    private final GuestAccessTokens accessTokens;
 
     public OrderService(OrderRepository orderRepository, WorkingHoursRepository workingHoursRepository,
                         CatalogApi catalogApi, AvailabilityService availabilityService, OwnerApi ownerApi,
-                        OrderProperties properties, ApplicationEventPublisher events) {
+                        OrderProperties properties, ApplicationEventPublisher events,
+                        GuestAccessTokens accessTokens) {
         this.orderRepository = orderRepository;
         this.workingHoursRepository = workingHoursRepository;
         this.catalogApi = catalogApi;
@@ -77,6 +79,7 @@ public class OrderService {
         this.ownerApi = ownerApi;
         this.properties = properties;
         this.events = events;
+        this.accessTokens = accessTokens;
     }
 
     /**
@@ -85,12 +88,15 @@ public class OrderService {
      * slot under a lock (see {@link #ensureSlotIsBookable}), then reserves stock per line. The
      * order's lead time is the longest of its items'.
      *
+     * <p>Also issues the guest's magic-link token. Only its hash is kept, so the returned
+     * {@link PlacedOrder} is the one and only time the token itself exists outside the guest's hands.
+     *
      * @throws NotFoundException  (404) if an item doesn't exist
      * @throws ConflictException  (409) if an item can't be ordered or the slot isn't bookable
      * @throws IllegalArgumentException (400) for too many lines or units, a repeated item, a pickup
      *                                  time that isn't in the future, too little notice or too little stock
      */
-    public Order place(CheckoutRequest request) {
+    public PlacedOrder place(CheckoutRequest request) {
         checkLimits(request.lines());
         requireFuture(request.pickupAt());
         List<UUID> itemIds = request.lines().stream().map(OrderLineRequest::itemId).toList();
@@ -125,7 +131,10 @@ public class OrderService {
             ItemSnapshot item = items.get(line.itemId());
             builder.line(item.id(), item.name(), item.price(), line.quantity());
         }
-        Order saved = orderRepository.save(builder.build());
+        Order order = builder.build();
+        String accessToken = accessTokens.newToken();
+        order.issueAccessToken(accessTokens.hash(accessToken));
+        Order saved = orderRepository.save(order);
 
         // Capacity (the slot) and stock (physical inventory) are separate constraints;
         // the catalog ignores this for items that don't track stock.
@@ -134,7 +143,7 @@ public class OrderService {
         }
         publish(new OrderPlaced(saved.getId(), saved.getReference(), saved.getPickupAt(), saved.getSubtotal(),
                 Instant.now()));
-        return saved;
+        return new PlacedOrder(saved, accessToken);
     }
 
     @Transactional(readOnly = true)

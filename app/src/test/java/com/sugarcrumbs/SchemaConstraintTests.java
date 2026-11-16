@@ -113,6 +113,25 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void twoOrdersCannotShareAnAccessTokenHash() {
+        UUID first = insertOrder("PENDING", "SC-AAAA7");
+        UUID second = insertOrder("PENDING", "SC-AAAA8");
+        String hash = "c".repeat(64);
+        jdbc.update("UPDATE ordering.orders SET access_token_hash = ? WHERE id = ?", hash, first);
+
+        assertViolates("uk_orders_access_token_hash",
+                () -> jdbc.update("UPDATE ordering.orders SET access_token_hash = ? WHERE id = ?", hash, second));
+    }
+
+    @Test
+    void anAccessTokenExpiryNeedsAToken() {
+        UUID order = insertOrder("CANCELLED", "SC-AAAA9");
+
+        assertViolates("ck_orders_access_token_expiry", () -> jdbc.update(
+                "UPDATE ordering.orders SET access_token_expires_at = now() WHERE id = ?", order));
+    }
+
+    @Test
     void anOrderLineTotalMustBeUnitPriceTimesQuantity() {
         UUID order = insertOrder("PENDING", "SC-AAAA3");
 
