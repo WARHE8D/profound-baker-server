@@ -86,6 +86,32 @@ class DeploymentFilesTests {
                 .doesNotContain("browse");
     }
 
+    /** #24: nightly backups of the database and the images, off the server, and a signal when they stop. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void backupsRunInProductionReadingUploadsWithoutWritingThem() throws IOException {
+        Map<String, Object> backup = services("docker-compose.prod.yml").get("backup");
+
+        assertThat(backup).containsEntry("build", "./infra/backup");
+        assertThat((List<Object>) backup.get("volumes")).contains("uploads:/data/uploads:ro");
+        assertThat((Map<String, Object>) backup.get("environment")).containsKeys(
+                "PGHOST", "PGPASSWORD", "BACKUP_S3_BUCKET", "BACKUP_ENCRYPTION_PASSWORD");
+        assertThat(Files.readString(REPO_ROOT.resolve("infra/backup/Dockerfile")))
+                .contains("FROM postgres:17-alpine")
+                .containsPattern("HEALTHCHECK[\\s\\S]*last-success");
+    }
+
+    @Test
+    void backupsStayOutOfGitAndTheImageAndScriptsKeepUnixLineEndings() throws IOException {
+        assertThat(Files.readAllLines(REPO_ROOT.resolve(".gitignore"))).contains("/backups/");
+        assertThat(Files.readAllLines(REPO_ROOT.resolve(".dockerignore"))).contains("backups/");
+        assertThat(Files.readAllLines(REPO_ROOT.resolve(".gitattributes"))).contains("*.sh text eol=lf");
+        for (String script : List.of("backup.sh", "entrypoint.sh")) {
+            assertThat(Files.readString(REPO_ROOT.resolve("infra/backup").resolve(script)))
+                    .as(script).startsWith("#!/bin/sh\n").doesNotContain("\r");
+        }
+    }
+
     @Test
     void everyComposeVariableIsDocumentedInEnvExample() throws IOException {
         Pattern variable = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)");
