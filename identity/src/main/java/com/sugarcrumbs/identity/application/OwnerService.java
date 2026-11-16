@@ -2,6 +2,8 @@ package com.sugarcrumbs.identity.application;
 
 import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
+import com.sugarcrumbs.identity.OwnerSettings;
+import com.sugarcrumbs.identity.domain.Address;
 import com.sugarcrumbs.identity.domain.Owner;
 import com.sugarcrumbs.identity.persistence.OwnerRepository;
 import org.springframework.security.core.Authentication;
@@ -10,6 +12,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,6 +48,41 @@ public class OwnerService implements OwnerApi {
             return UUID.fromString(jwt.getSubject());
         }
         return getTheOwner().getId();
+    }
+
+    /** Read on every availability and checkout request; one indexed row, so not cached yet. */
+    @Override
+    public OwnerSettings settings() {
+        return new OwnerSettings(getTheOwner().getTimeZone());
+    }
+
+    /**
+     * Replaces the editable profile fields. The login email and password have their own,
+     * stricter flows, so they are not part of the profile.
+     *
+     * @param timeZone an IANA zone id such as {@code Europe/London}; 400 if unknown
+     */
+    @Transactional
+    public Owner updateProfile(UUID ownerId, String businessName, String ownerName, String phone, String logoUrl,
+                               Address address, String timeZone) {
+        Owner owner = getOwner(ownerId);
+        owner.updateProfile(businessName, ownerName, phone, logoUrl, address, parseZone(timeZone));
+        return owner;
+    }
+
+    /**
+     * Only region ids ({@code Europe/London}) and {@code UTC} are accepted: a fixed offset like
+     * {@code +01:00} would silently ignore daylight saving and shift every slot for half the year.
+     */
+    static ZoneId parseZone(String id) {
+        if (id == null || !(ZoneId.getAvailableZoneIds().contains(id) || id.equals("UTC"))) {
+            throw new IllegalArgumentException("timeZone must be an IANA time zone id such as 'Europe/London'");
+        }
+        try {
+            return ZoneId.of(id);
+        } catch (DateTimeException e) {
+            throw new IllegalArgumentException("timeZone must be an IANA time zone id such as 'Europe/London'");
+        }
     }
 
     /** The Owner a token was issued to. 404 if it no longer exists. */

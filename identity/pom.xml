@@ -30,6 +30,10 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+        </dependency>
         <!-- Issues the RS256 access tokens (Nimbus JOSE) and validates them as a resource server. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

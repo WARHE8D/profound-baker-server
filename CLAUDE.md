@@ -70,12 +70,10 @@ Known problems (see the PLAN.md §2 table; the issue that fixes each one is in b
 - Owner routes require a JWT (#10, `app`'s `SecurityConfig`), but the public surface still lives at the old
   paths (`GET /api/items`, `/api/categories`, `/api/availability`, `POST /api/bookings`) with no CORS or rate
   limits yet. [#13]
-- No way to create the Owner, so availability and booking fail until a row is inserted by hand. [#11]
 - **Overbooking race:** capacity is checked, then the booking is inserted, with no lock in between. [#15]
 - Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also
   uses `toHours()`, which rounds down. [#15]
 - No price snapshot, so repricing an item rewrites historical orders. [#14]
-- `BusinessTimeZone.ZONE = ZoneId.systemDefault()`. It should come from `Owner.timeZone`. [#12]
 
 ---
 
@@ -93,8 +91,8 @@ and those are enforced by the build.
 profound-baker-server/
 ├── pom.xml          # baker-parent: versions, annotation processors, module list
 ├── common/          # com.sugarcrumbs.common    shared kernel (OPEN module): BaseEntity, JpaAuditingConfig,
-│                    #                           ApiError + GlobalExceptionHandler, Conflict/NotFound exceptions,
-│                    #                           BusinessTimeZone. No business rules.
+│                    #                           ApiError + GlobalExceptionHandler, Conflict/NotFound exceptions.
+│                    #                           No business rules. (The time zone is Owner.timeZone, via OwnerApi.)
 ├── identity/        # com.sugarcrumbs.identity  the Owner                  → future auth-service
 ├── catalog/         # com.sugarcrumbs.catalog   items, categories, images  → future catalog-service
 ├── ordering/        # com.sugarcrumbs.ordering  bookings, availability,    → future order-service

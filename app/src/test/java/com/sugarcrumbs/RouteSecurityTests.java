@@ -82,6 +82,9 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "DELETE, /api/availability/blocked-dates/" + ID,
             "GET,    /api/auth/me",
             "POST,   /api/auth/logout",
+            "GET,    /api/owner/profile",
+            "PUT,    /api/owner/profile",
+            "POST,   /api/owner/password",
             // Default deny: a path nobody mapped is still behind authentication.
             "GET,    /api/not-a-route",
     })

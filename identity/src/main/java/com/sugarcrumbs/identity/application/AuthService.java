@@ -1,5 +1,6 @@
 package com.sugarcrumbs.identity.application;
 
+import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.config.JwtProperties;
 import com.sugarcrumbs.identity.domain.Owner;
 import com.sugarcrumbs.identity.domain.RefreshToken;
@@ -138,6 +139,31 @@ public class AuthService {
         refreshTokenRepository.findByTokenHash(hash(refreshToken))
                 .filter(token -> token.getOwnerId().equals(ownerId))
                 .ifPresent(token -> refreshTokenRepository.revokeFamily(token.getFamilyId(), clock.instant()));
+    }
+
+    /**
+     * Changes the Owner's password after re-checking the current one (a stolen access token alone
+     * must not be enough to lock the Owner out), then revokes every refresh token so all sessions,
+     * including the caller's, must log in again. Access tokens already issued expire on their own
+     * within the access-token lifetime.
+     *
+     * @throws IllegalArgumentException (400) if the current password is wrong or the new one is unchanged;
+     *                                  deliberately not 401, which a client would read as "token expired"
+     */
+    @Transactional
+    public void changePassword(UUID ownerId, String currentPassword, String newPassword) {
+        Owner owner = ownerRepository.findById(ownerId)
+                .orElseThrow(() -> new NotFoundException("owner not found"));
+        if (!passwordEncoder.matches(currentPassword, owner.getPasswordHash())) {
+            log.info("Owner password change refused: wrong current password");
+            throw new IllegalArgumentException("the current password is incorrect");
+        }
+        if (passwordEncoder.matches(newPassword, owner.getPasswordHash())) {
+            throw new IllegalArgumentException("the new password must differ from the current one");
+        }
+        owner.changePasswordHash(passwordEncoder.encode(newPassword));
+        int revoked = refreshTokenRepository.revokeAllForOwner(ownerId, clock.instant());
+        log.info("Owner password changed; revoked {} active refresh tokens", revoked);
     }
 
     private IssuedTokens issue(UUID ownerId, String refreshToken, Instant now) {

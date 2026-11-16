@@ -13,7 +13,7 @@ import java.util.UUID;
  * The Owner's credentials for tests that call owner routes. The app creates the Owner on
  * first start from {@link AbstractIntegrationTest#OWNER_EMAIL}/{@code OWNER_PASSWORD}
  * (OwnerBootstrap); the database is shared across test classes, so the credentials are
- * reset in case an earlier test changed them.
+ * reset (with the time zone, back to UTC) in case an earlier test changed them.
  */
 final class OwnerFixture {
 
@@ -26,7 +26,7 @@ final class OwnerFixture {
     /** @return the Owner's id */
     static UUID ensureOwner(JdbcTemplate jdbc, PasswordEncoder passwordEncoder) {
         UUID id = jdbc.queryForObject("SELECT id FROM identity.owners", UUID.class);
-        jdbc.update("UPDATE identity.owners SET email = ?, password_hash = ? WHERE id = ?",
+        jdbc.update("UPDATE identity.owners SET email = ?, password_hash = ?, time_zone = 'UTC' WHERE id = ?",
                 EMAIL, passwordEncoder.encode(PASSWORD), id);
         return id;
     }

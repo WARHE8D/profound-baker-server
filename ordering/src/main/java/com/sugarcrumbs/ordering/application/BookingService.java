@@ -1,6 +1,7 @@
 package com.sugarcrumbs.ordering.application;
 
 import com.sugarcrumbs.catalog.CatalogApi;
+import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.catalog.ItemSnapshot;
 import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.common.exception.NotFoundException;
@@ -20,10 +21,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.UUID;
 
-import static com.sugarcrumbs.common.time.BusinessTimeZone.ZONE;
 
 @Service
 @Transactional
@@ -32,12 +33,14 @@ public class BookingService {
     private final BookingRepository bookingRepository;
     private final CatalogApi catalogApi;
     private final AvailabilityService availabilityService;
+    private final OwnerApi ownerApi;
 
     public BookingService(BookingRepository bookingRepository, CatalogApi catalogApi,
-                          AvailabilityService availabilityService) {
+                          AvailabilityService availabilityService, OwnerApi ownerApi) {
         this.bookingRepository = bookingRepository;
         this.catalogApi = catalogApi;
         this.availabilityService = availabilityService;
+        this.ownerApi = ownerApi;
     }
 
     public Booking create(BookingCreateRequest request) {
@@ -136,8 +139,10 @@ public class BookingService {
     }
 
     private void ensureSlotIsBookable(Instant scheduledFor, UUID excludeBookingId) {
-        LocalDate date = scheduledFor.atZone(ZONE).toLocalDate();
-        LocalTime time = scheduledFor.atZone(ZONE).toLocalTime().withSecond(0).withNano(0);
+        // Slots are local times in the bakery's zone, not the server's.
+        ZonedDateTime local = scheduledFor.atZone(ownerApi.settings().timeZone());
+        LocalDate date = local.toLocalDate();
+        LocalTime time = local.toLocalTime().withSecond(0).withNano(0);
 
         DayAvailabilityResponse day = availabilityService.computeForDate(date, excludeBookingId);
         if (!day.open()) {
