@@ -15,6 +15,8 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.ZoneId;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,7 +48,29 @@ class OwnerBootstrapTests {
         assertThat(passwordEncoder.matches(PASSWORD, owner.getPasswordHash())).isTrue();
         assertThat(owner.getOwnerName()).isEqualTo("Owner");
         assertThat(owner.getBusinessName()).isEqualTo("SugarCrumbs");
+        assertThat(owner.getTimeZone()).isEqualTo(ZoneId.of("UTC"));
         assertThat(output.getOut()).contains("change the password").doesNotContain("baker@example.com", PASSWORD);
+    }
+
+    @Test
+    void createsTheOwnerInTheConfiguredTimeZone() {
+        when(repository.count()).thenReturn(0L);
+
+        bootstrap("baker@example.com", PASSWORD, "Europe/London").ensureOwner();
+
+        ArgumentCaptor<Owner> saved = ArgumentCaptor.forClass(Owner.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().getTimeZone()).isEqualTo(ZoneId.of("Europe/London"));
+    }
+
+    @Test
+    void refusesAnInvalidTimeZone() {
+        when(repository.count()).thenReturn(0L);
+
+        assertThatThrownBy(() -> bootstrap("baker@example.com", PASSWORD, "+01:00").ensureOwner())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("APP_OWNER_TIME_ZONE");
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -130,7 +154,12 @@ class OwnerBootstrapTests {
     }
 
     private OwnerBootstrap bootstrap(String email, String password) {
-        OwnerBootstrapProperties properties = new OwnerBootstrapProperties(email, password, "Owner", "SugarCrumbs");
+        return bootstrap(email, password, "UTC");
+    }
+
+    private OwnerBootstrap bootstrap(String email, String password, String timeZone) {
+        OwnerBootstrapProperties properties =
+                new OwnerBootstrapProperties(email, password, "Owner", "SugarCrumbs", timeZone);
         return new OwnerBootstrap(repository, passwordEncoder, properties, null);
     }
 }

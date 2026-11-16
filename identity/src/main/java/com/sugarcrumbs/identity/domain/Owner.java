@@ -2,6 +2,7 @@ package com.sugarcrumbs.identity.domain;
 
 import com.sugarcrumbs.common.persistence.BaseEntity;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
@@ -9,6 +10,9 @@ import jakarta.persistence.UniqueConstraint;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+
+import java.time.ZoneId;
+import java.util.Objects;
 
 /**
  * The patissier who owns and runs the business.
@@ -67,6 +71,11 @@ public class Owner extends BaseEntity {
     @Embedded
     private Address address;
 
+    /** Working hours and slots are local times in this zone; every stored time is an {@code Instant}. */
+    @Convert(converter = ZoneIdConverter.class)
+    @Column(name = "time_zone", nullable = false, length = 64)
+    private ZoneId timeZone;
+
     protected Owner() {
         // required by JPA
     }
@@ -79,6 +88,7 @@ public class Owner extends BaseEntity {
         this.phone = builder.phone;
         this.logoUrl = builder.logoUrl;
         this.address = builder.address;
+        this.timeZone = Objects.requireNonNull(builder.timeZone, "timeZone");
     }
 
     public static Builder builder() {
@@ -87,12 +97,14 @@ public class Owner extends BaseEntity {
 
     // ---- Business behavior ----
 
-    public void updateProfile(String businessName, String ownerName, String phone, String logoUrl, Address address) {
+    public void updateProfile(String businessName, String ownerName, String phone, String logoUrl, Address address,
+                              ZoneId timeZone) {
         this.businessName = requireNonBlank(businessName, "businessName");
         this.ownerName = requireNonBlank(ownerName, "ownerName");
         this.phone = phone;
         this.logoUrl = logoUrl;
         this.address = address;
+        this.timeZone = Objects.requireNonNull(timeZone, "timeZone");
     }
 
     /** Changes the login email. Uniqueness is enforced by the DB constraint + a pre-check in the service layer. */
@@ -142,6 +154,10 @@ public class Owner extends BaseEntity {
         return address;
     }
 
+    public ZoneId getTimeZone() {
+        return timeZone;
+    }
+
     @Override
     public String toString() {
         // passwordHash intentionally excluded from toString/logs
@@ -156,6 +172,7 @@ public class Owner extends BaseEntity {
         private String phone;
         private String logoUrl;
         private Address address;
+        private ZoneId timeZone;
 
         private Builder() {
         }
@@ -192,6 +209,11 @@ public class Owner extends BaseEntity {
 
         public Builder address(Address address) {
             this.address = address;
+            return this;
+        }
+
+        public Builder timeZone(ZoneId timeZone) {
+            this.timeZone = timeZone;
             return this;
         }
 

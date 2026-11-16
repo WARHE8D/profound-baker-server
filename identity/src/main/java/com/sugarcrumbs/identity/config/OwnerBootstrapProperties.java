@@ -11,13 +11,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param initialPassword first password ({@code APP_OWNER_INITIAL_PASSWORD}); change it after the first login
  * @param name            the Owner's name, editable later through the profile API (#12)
  * @param businessName    the bakery's name, editable later through the profile API (#12)
+ * @param timeZone        the bakery's IANA time zone ({@code APP_OWNER_TIME_ZONE}), editable later
  */
 @ConfigurationProperties("app.owner")
 public record OwnerBootstrapProperties(
         String email,
         String initialPassword,
         @DefaultValue("Owner") String name,
-        @DefaultValue("SugarCrumbs") String businessName
+        @DefaultValue("SugarCrumbs") String businessName,
+        @DefaultValue("UTC") String timeZone
 ) {
 
     /** Binding leaves an unresolvable {@code ${VAR}} in place, so that counts as unset too. */

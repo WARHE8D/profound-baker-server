@@ -41,6 +41,7 @@ services:
       # Only needed for the first start, which creates the Owner; optional afterwards.
       APP_OWNER_EMAIL: ${APP_OWNER_EMAIL:-}
       APP_OWNER_INITIAL_PASSWORD: ${APP_OWNER_INITIAL_PASSWORD:-}
+      APP_OWNER_TIME_ZONE: ${APP_OWNER_TIME_ZONE:-UTC}
     volumes:
       - uploads:/data/uploads
     # Health check is defined in the Dockerfile (Actuator readiness on the internal port 9080).

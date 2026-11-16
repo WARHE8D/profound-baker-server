@@ -1,6 +1,5 @@
 package com.sugarcrumbs.ordering.application;
 
-import com.sugarcrumbs.common.time.BusinessTimeZone;
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.ordering.domain.BlockedDate;
 import com.sugarcrumbs.ordering.domain.BookingStatus;
@@ -16,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.UUID;
@@ -34,6 +34,10 @@ import java.util.UUID;
  * otherwise count against itself. {@link #computeForDate(LocalDate, UUID)}
  * exists for exactly that case — pass the booking's own id to exclude it
  * from its own capacity count.
+ *
+ * <p>Working hours are local times in the Owner's time zone ({@link OwnerApi#settings()}),
+ * while bookings are stored as instants; each slot is converted with that zone, so the
+ * server's own zone never matters.
  */
 @Service
 @Transactional(readOnly = true)
@@ -64,7 +68,8 @@ public class AvailabilityService {
     /** @param excludeBookingId a booking to leave out of its own slot's occupancy count — see class javadoc */
     public DayAvailabilityResponse computeForDate(LocalDate date, UUID excludeBookingId) {
         UUID ownerId = ownerApi.currentOwnerId();
-        return computeForDate(ownerId, date, blockedDateRepository.findAllByOwnerIdOrderByStartDateAsc(ownerId), excludeBookingId);
+        return computeForDate(ownerId, date, blockedDateRepository.findAllByOwnerIdOrderByStartDateAsc(ownerId),
+                excludeBookingId, ownerApi.settings().timeZone());
     }
 
     public Map<LocalDate, DayAvailabilityResponse> computeForRange(LocalDate from, LocalDate to) {
@@ -77,16 +82,17 @@ public class AvailabilityService {
 
         UUID ownerId = ownerApi.currentOwnerId();
         List<BlockedDate> blockedDates = blockedDateRepository.findAllByOwnerIdOrderByStartDateAsc(ownerId);
+        ZoneId zone = ownerApi.settings().timeZone();
 
         Map<LocalDate, DayAvailabilityResponse> result = new LinkedHashMap<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
-            result.put(date, computeForDate(ownerId, date, blockedDates, null));
+            result.put(date, computeForDate(ownerId, date, blockedDates, null, zone));
         }
         return result;
     }
 
     private DayAvailabilityResponse computeForDate(UUID ownerId, LocalDate date, List<BlockedDate> blockedDates,
-                                                   UUID excludeBookingId) {
+                                                   UUID excludeBookingId, ZoneId zone) {
         BlockedDate blocking = blockedDates.stream()
                 .filter(bd -> bd.covers(date))
                 .findFirst()
@@ -101,11 +107,12 @@ public class AvailabilityService {
             return DayAvailabilityResponse.closed(date, "Closed on " + date.getDayOfWeek());
         }
 
-        return DayAvailabilityResponse.open(date, generateSlots(hours, date, excludeBookingId));
+        return DayAvailabilityResponse.open(date, generateSlots(hours, date, excludeBookingId, zone));
     }
 
     /** Slots that don't evenly divide the working window are simply not offered — no partial trailing slot. */
-    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date, UUID excludeBookingId) {
+    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date, UUID excludeBookingId,
+                                                 ZoneId zone) {
         List<TimeSlotResponse> slots = new ArrayList<>();
         LocalTime cursor = hours.getStartTime();
         while (true) {
@@ -117,7 +124,7 @@ public class AvailabilityService {
                 break;
             }
             int capacity = hours.getMaxConcurrentBookings();
-            int booked = bookedCount(date, cursor, slotEnd, excludeBookingId);
+            int booked = bookedCount(date, cursor, slotEnd, excludeBookingId, zone);
             int remaining = Math.max(0, capacity - booked);
             slots.add(new TimeSlotResponse(cursor, slotEnd, capacity, remaining, remaining > 0));
             cursor = slotEnd;
@@ -125,9 +132,10 @@ public class AvailabilityService {
         return slots;
     }
 
-    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeBookingId) {
-        Instant slotStartInstant = date.atTime(slotStart).atZone(BusinessTimeZone.ZONE).toInstant();
-        Instant slotEndInstant = date.atTime(slotEnd).atZone(BusinessTimeZone.ZONE).toInstant();
+    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeBookingId,
+                            ZoneId zone) {
+        Instant slotStartInstant = date.atTime(slotStart).atZone(zone).toInstant();
+        Instant slotEndInstant = date.atTime(slotEnd).atZone(zone).toInstant();
 
         if (excludeBookingId == null) {
             return (int) bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(

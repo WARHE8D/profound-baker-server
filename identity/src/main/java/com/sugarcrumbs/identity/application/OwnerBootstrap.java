@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.ZoneId;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -75,11 +76,19 @@ class OwnerBootstrap implements SmartInitializingSingleton {
                     "APP_OWNER_INITIAL_PASSWORD must be at least " + MIN_PASSWORD_LENGTH + " characters");
         }
 
+        ZoneId timeZone;
+        try {
+            timeZone = OwnerService.parseZone(properties.timeZone());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("APP_OWNER_TIME_ZONE must be an IANA time zone id such as 'Europe/London'");
+        }
+
         ownerRepository.save(Owner.builder()
                 .email(email)
                 .passwordHash(passwordEncoder.encode(properties.initialPassword()))
                 .ownerName(properties.name())
                 .businessName(properties.businessName())
+                .timeZone(timeZone)
                 .build());
         // No email here: logs must not carry PII at INFO/WARN (CLAUDE.md §6).
         log.warn("Created the Owner from APP_OWNER_EMAIL; log in, change the password, "

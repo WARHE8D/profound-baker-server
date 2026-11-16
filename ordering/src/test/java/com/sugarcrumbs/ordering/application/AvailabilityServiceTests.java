@@ -1,6 +1,8 @@
 package com.sugarcrumbs.ordering.application;
 
 import com.sugarcrumbs.identity.OwnerApi;
+import com.sugarcrumbs.identity.OwnerSettings;
+import com.sugarcrumbs.ordering.domain.BookingStatus;
 import com.sugarcrumbs.ordering.domain.BlockedDate;
 import com.sugarcrumbs.ordering.domain.WorkingHours;
 import com.sugarcrumbs.ordering.persistence.BlockedDateRepository;
@@ -13,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.DayOfWeek;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -24,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Slot math: working hours + blocked dates + current bookings give per-slot remaining capacity. */
@@ -44,7 +49,39 @@ class AvailabilityServiceTests {
     @BeforeEach
     void setUp() {
         when(ownerApi.currentOwnerId()).thenReturn(ownerId);
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("UTC")));
         when(blockedDateRepository.findAllByOwnerIdOrderByStartDateAsc(ownerId)).thenReturn(List.of());
+    }
+
+    /**
+     * Working hours are wall-clock times at the bakery: a 09:00 slot in Tokyo (UTC+9) is 00:00Z,
+     * whatever zone the server runs in.
+     */
+    @Test
+    void slotsAreMatchedToBookingsInTheOwnersTimeZone() {
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("Asia/Tokyo")));
+        open("09:00", "09:30", 30, 1);
+
+        service.computeForDate(DAY);
+
+        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"), BookingStatus.CANCELLED);
+    }
+
+    /** Daylight saving: the same 09:00 slot is 09:00Z in London's winter and 08:00Z in its summer. */
+    @Test
+    void theOwnersZoneFollowsDaylightSaving() {
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("Europe/London")));
+        LocalDate summerTuesday = LocalDate.of(2026, 6, 2);
+        open("09:00", "09:30", 30, 1);
+
+        service.computeForRange(DAY, DAY);
+        service.computeForRange(summerTuesday, summerTuesday);
+
+        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
+                Instant.parse("2026-12-01T09:00:00Z"), Instant.parse("2026-12-01T09:30:00Z"), BookingStatus.CANCELLED);
+        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
+                Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), BookingStatus.CANCELLED);
     }
 
     @Test

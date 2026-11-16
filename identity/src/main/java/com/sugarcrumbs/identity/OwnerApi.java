@@ -15,4 +15,11 @@ public interface OwnerApi {
      * @throws IllegalStateException if no Owner has been set up yet
      */
     UUID currentOwnerId();
+
+    /**
+     * The bakery's business settings, chiefly its time zone.
+     *
+     * @throws IllegalStateException if no Owner has been set up yet
+     */
+    OwnerSettings settings();
 }

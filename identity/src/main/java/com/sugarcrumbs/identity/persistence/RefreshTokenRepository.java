@@ -29,4 +29,13 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
              where t.familyId = :familyId and t.revokedAt is null
             """)
     int revokeFamily(@Param("familyId") UUID familyId, @Param("now") Instant now);
+
+    /** Revokes every still-active token of the Owner: all sessions end (password change). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update RefreshToken t
+               set t.revokedAt = :now, t.updatedAt = :now, t.version = t.version + 1
+             where t.ownerId = :ownerId and t.revokedAt is null
+            """)
+    int revokeAllForOwner(@Param("ownerId") UUID ownerId, @Param("now") Instant now);
 }
