@@ -1,8 +1,9 @@
 package com.sugarcrumbs.ordering.web;
 
 import com.sugarcrumbs.ordering.application.OrderService;
+import com.sugarcrumbs.ordering.application.PlacedOrder;
 import com.sugarcrumbs.ordering.web.dto.CheckoutRequest;
-import com.sugarcrumbs.ordering.web.dto.OrderResponse;
+import com.sugarcrumbs.ordering.web.dto.CheckoutResponse;
 import com.sugarcrumbs.ordering.web.mapper.OrderMapper;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -33,8 +34,11 @@ public class PublicOrderController {
         this.orderMapper = orderMapper;
     }
 
+    /** Places the order and returns it with the guest's magic-link token, the only time it is ever sent. */
     @PostMapping
-    public ResponseEntity<OrderResponse> checkout(@Valid @RequestBody CheckoutRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(orderMapper.toResponse(orderService.place(request)));
+    public ResponseEntity<CheckoutResponse> checkout(@Valid @RequestBody CheckoutRequest request) {
+        PlacedOrder placed = orderService.place(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new CheckoutResponse(orderMapper.toResponse(placed.order()), placed.accessToken()));
     }
 }

@@ -28,7 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * PENDING / CONFIRMED / IN_PROGRESS → CANCELLED
  * </pre>
  *
- * Lines and notes can be edited only while the order is pending (#16).
+ * Lines and notes can be edited only while the order is pending (#16). The guest's magic link
+ * (#18) is issued once and starts expiring when the order reaches a final state.
  */
 class OrderTests {
 
@@ -293,6 +294,66 @@ class OrderTests {
 
             assertThatIllegalStateException().isThrownBy(() -> transition.accept(order));
             assertThat(order.getStatus()).isEqualTo(from);
+        }
+    }
+
+    @Nested
+    class GuestAccess {
+
+        private static final String HASH = "a".repeat(64);
+
+        @Test
+        void aTokenHashIsIssuedOnceAndKeepsTheLinkOpenWhileTheOrderIs() {
+            Order order = valid().build();
+            assertThat(order.isAccessTokenValid(Instant.now())).as("no link before issuing").isFalse();
+
+            order.issueAccessToken(HASH);
+            order.confirm();
+
+            assertThat(order.getAccessTokenHash()).isEqualTo(HASH);
+            assertThat(order.getAccessTokenExpiresAt()).isNull();
+            assertThat(order.isAccessTokenValid(Instant.now().plus(java.time.Duration.ofDays(365)))).isTrue();
+            assertThatIllegalStateException().isThrownBy(() -> order.issueAccessToken("b".repeat(64)));
+            assertThat(order.getAccessTokenHash()).isEqualTo(HASH);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "abc", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"})
+        void onlyALowerCaseHexSha256IsAccepted(String hash) {
+            assertThatIllegalArgumentException().isThrownBy(() -> valid().build().issueAccessToken(hash));
+        }
+
+        @ParameterizedTest
+        @EnumSource(value = OrderStatus.class, names = {"FULFILLED", "REJECTED", "CANCELLED"})
+        void reachingAFinalStateStartsThe30DayExpiry(OrderStatus finalState) {
+            Order order = valid().build();
+            order.issueAccessToken(HASH);
+            Instant before = Instant.now();
+
+            switch (finalState) {
+                case FULFILLED -> {
+                    order.confirm();
+                    order.fulfill();
+                }
+                case REJECTED -> order.reject("no");
+                default -> order.cancel("no");
+            }
+
+            assertThat(order.getAccessTokenExpiresAt())
+                    .isBetween(before.plus(Order.ACCESS_AFTER_FINAL), Instant.now().plus(Order.ACCESS_AFTER_FINAL));
+            assertThat(order.isAccessTokenValid(Instant.now())).isTrue();
+            assertThat(order.isAccessTokenValid(order.getAccessTokenExpiresAt())).isFalse();
+        }
+
+        /** Orders from before magic links have no token, so there is nothing to expire. */
+        @Test
+        void anOrderWithoutATokenGetsNoExpiry() {
+            Order order = valid().build();
+
+            order.cancel("no");
+
+            assertThat(order.getAccessTokenExpiresAt()).isNull();
+            assertThat(order.isAccessTokenValid(Instant.now())).isFalse();
         }
     }
 

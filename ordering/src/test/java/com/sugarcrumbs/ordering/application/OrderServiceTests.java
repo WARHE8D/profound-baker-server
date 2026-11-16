@@ -85,8 +85,9 @@ class OrderServiceTests {
     private final AvailabilityService availabilityService = mock(AvailabilityService.class);
     private final OwnerApi ownerApi = mock(OwnerApi.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    private final GuestAccessTokens tokens = new GuestAccessTokens();
     private final OrderService service = new OrderService(orderRepository, workingHoursRepository, catalogApi,
-            availabilityService, ownerApi, LIMITS, events);
+            availabilityService, ownerApi, LIMITS, events, tokens);
 
     private final UUID ownerId = UUID.randomUUID();
     /** Tomorrow 09:00 UTC: comfortably in the future and the start of the stubbed slot. */
@@ -130,7 +131,7 @@ class OrderServiceTests {
         CheckoutRequest request = checkout(pickupAt,
                 IntStream.range(0, 3).mapToObj(i -> new OrderLineRequest(UUID.randomUUID(), 5)).toList());
 
-        assertThat(service.place(request).getLines()).hasSize(3);
+        assertThat(service.place(request).order().getLines()).hasSize(3);
     }
 
     /** With no lead time the notice check alone would accept a slot that is starting right now. */
@@ -268,7 +269,7 @@ class OrderServiceTests {
         stubOpenSlot();
         UUID bread = UUID.randomUUID();
 
-        Order order = service.place(checkout(pickupAt, List.of(new OrderLineRequest(bread, 2))));
+        Order order = service.place(checkout(pickupAt, List.of(new OrderLineRequest(bread, 2)))).order();
 
         InOrder inOrder = inOrder(catalogApi, events);
         inOrder.verify(catalogApi).reserveStock(bread, 2);
@@ -276,6 +277,19 @@ class OrderServiceTests {
         verify(events).publishEvent(argThat((Object event) -> event instanceof OrderPlaced p
                 && p.reference().equals(order.getReference()) && p.pickupAt().equals(pickupAt)
                 && p.subtotal().compareTo(new BigDecimal("5.00")) == 0));
+    }
+
+    /** The token leaves only in the result; the order, and so the database, keeps just its hash. */
+    @Test
+    void checkoutIssuesAMagicLinkTokenAndKeepsOnlyItsHash() {
+        stubOpenSlot();
+
+        PlacedOrder placed = service.place(checkout(pickupAt, List.of(new OrderLineRequest(UUID.randomUUID(), 1))));
+
+        assertThat(placed.accessToken()).matches("[A-Za-z0-9_-]{43}");
+        assertThat(placed.order().getAccessTokenHash()).isEqualTo(tokens.hash(placed.accessToken()));
+        assertThat(placed.order().getAccessTokenExpiresAt()).isNull();
+        assertThat(placed.toString()).doesNotContain(placed.accessToken());
     }
 
     @Test

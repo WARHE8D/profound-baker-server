@@ -12,6 +12,7 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,6 +25,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * A guest's order: one or more {@link OrderLine}s collected at a single pickup
@@ -40,6 +42,11 @@ import java.util.UUID;
 @Entity(name = "CustomerOrder")
 @Table(schema = "ordering", name = "orders")
 public class Order extends BaseEntity {
+
+    /** How long a guest's magic link keeps working once the order is over (fulfilled, rejected or cancelled). */
+    public static final Duration ACCESS_AFTER_FINAL = Duration.ofDays(30);
+
+    private static final Pattern TOKEN_HASH = Pattern.compile("[0-9a-f]{64}");
 
     private static final Set<OrderStatus> CANCELLABLE_FROM =
             EnumSet.of(OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.IN_PROGRESS);
@@ -66,6 +73,14 @@ public class Order extends BaseEntity {
 
     @Column(name = "rejection_reason", length = 300)
     private String rejectionReason;
+
+    /** Hex SHA-256 of the guest's magic-link token; the token itself is never stored. */
+    @Column(name = "access_token_hash", length = 64)
+    private String accessTokenHash;
+
+    /** {@code null} while the order is open; set when it reaches a final state. */
+    @Column(name = "access_token_expires_at")
+    private Instant accessTokenExpiresAt;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("lineNo ASC")
@@ -97,6 +112,34 @@ public class Order extends BaseEntity {
         return new Builder();
     }
 
+    // ---- Guest access ----
+
+    /**
+     * Records the hash of the guest's magic-link token. Once only: a second link would leave the
+     * guest holding one that no longer works, with no way to be told.
+     */
+    public void issueAccessToken(String tokenHash) {
+        if (accessTokenHash != null) {
+            throw new IllegalStateException("this order already has an access token");
+        }
+        if (tokenHash == null || !TOKEN_HASH.matcher(tokenHash).matches()) {
+            throw new IllegalArgumentException("access token hash must be 64 lower-case hex characters");
+        }
+        this.accessTokenHash = tokenHash;
+    }
+
+    /** Whether the guest's link still opens this order at {@code now}. Orders from before links never do. */
+    public boolean isAccessTokenValid(Instant now) {
+        return accessTokenHash != null && (accessTokenExpiresAt == null || now.isBefore(accessTokenExpiresAt));
+    }
+
+    /** Called on every move into a final state: the guest keeps their link for a while to see how it ended. */
+    private void startAccessExpiry() {
+        if (accessTokenHash != null) {
+            this.accessTokenExpiresAt = Instant.now().plus(ACCESS_AFTER_FINAL);
+        }
+    }
+
     // ---- Business behavior: explicit state machine, not a raw setter ----
 
     public void confirm() {
@@ -114,6 +157,7 @@ public class Order extends BaseEntity {
             throw new IllegalStateException("cannot fulfill an order in status " + status);
         }
         this.status = OrderStatus.FULFILLED;
+        startAccessExpiry();
     }
 
     public void cancel(String reason) {
@@ -122,6 +166,7 @@ public class Order extends BaseEntity {
         }
         this.status = OrderStatus.CANCELLED;
         this.cancellationReason = reason;
+        startAccessExpiry();
     }
 
     /**
@@ -135,6 +180,7 @@ public class Order extends BaseEntity {
         }
         this.status = OrderStatus.REJECTED;
         this.rejectionReason = reason.strip();
+        startAccessExpiry();
     }
 
     public void reschedule(Instant newPickupAt) {
@@ -242,6 +288,14 @@ public class Order extends BaseEntity {
 
     public String getRejectionReason() {
         return rejectionReason;
+    }
+
+    public String getAccessTokenHash() {
+        return accessTokenHash;
+    }
+
+    public Instant getAccessTokenExpiresAt() {
+        return accessTokenExpiresAt;
     }
 
     public List<OrderLine> getLines() {

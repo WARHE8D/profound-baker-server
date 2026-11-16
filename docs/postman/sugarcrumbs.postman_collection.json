@@ -1458,6 +1458,8 @@
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "if (pm.response.code === 201) {",
                   "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "    // Returned once, never again: the guest's magic link (#18).",
+                  "    pm.collectionVariables.set('accessToken', pm.response.json().accessToken);",
                   "    console.log('orderId =', pm.collectionVariables.get('orderId'));",
                   "}"
                 ]
@@ -1492,7 +1494,7 @@
                 }
               }
             },
-            "description": "`pickupAt` must be the start of a bookable slot. Saves `orderId`."
+            "description": "`pickupAt` must be the start of a bookable slot. Saves `orderId`. Also saves `accessToken`, the guest's magic-link token, which no other response ever contains."
           }
         },
         {
