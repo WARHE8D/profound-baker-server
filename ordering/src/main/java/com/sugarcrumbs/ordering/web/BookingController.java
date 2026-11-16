@@ -4,7 +4,6 @@ import com.sugarcrumbs.ordering.application.BookingService;
 import com.sugarcrumbs.ordering.domain.Booking;
 import com.sugarcrumbs.ordering.domain.BookingStatus;
 import com.sugarcrumbs.ordering.web.dto.BookingCancelRequest;
-import com.sugarcrumbs.ordering.web.dto.BookingCreateRequest;
 import com.sugarcrumbs.ordering.web.dto.BookingRescheduleRequest;
 import com.sugarcrumbs.ordering.web.dto.BookingResponse;
 import jakarta.validation.Valid;
@@ -13,28 +12,22 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import java.net.URI;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * {@code POST /api/bookings} is intentionally open — this app uses
- * guest checkout (see {@code GuestContact}), so no auth is required to
- * create one. Every other endpoint here is an owner action and will
- * need an auth guard once Sprint 1 exists; none of that is wired yet,
- * so treat this controller as fully public for now.
+ * The Owner's bookings: list, view and move them through their lifecycle. Owner
+ * only. Guests place bookings through {@link PublicOrderController}; #14 renames
+ * these routes to {@code /api/orders}.
  */
 @RestController
 @RequestMapping("/api/bookings")
@@ -46,14 +39,6 @@ public class BookingController {
     public BookingController(BookingService bookingService, BookingResponses bookingResponses) {
         this.bookingService = bookingService;
         this.bookingResponses = bookingResponses;
-    }
-
-    @PostMapping
-    public ResponseEntity<BookingResponse> create(@Valid @RequestBody BookingCreateRequest request,
-                                                  UriComponentsBuilder uriBuilder) {
-        Booking created = bookingService.create(request);
-        URI location = uriBuilder.path("/api/bookings/{id}").buildAndExpand(created.getId()).toUri();
-        return ResponseEntity.created(location).body(bookingResponses.of(created));
     }
 
     @GetMapping("/{id}")

@@ -22,7 +22,7 @@ import java.util.List;
  * handle one response shape regardless of which query form they used.
  */
 @RestController
-@RequestMapping("/api/availability")
+@RequestMapping("/api/public/availability")
 public class AvailabilityController {
 
     private final AvailabilityService availabilityService;

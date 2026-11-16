@@ -2,6 +2,7 @@ package com.sugarcrumbs.common.web.error;
 
 import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.common.exception.NotFoundException;
+import com.sugarcrumbs.common.exception.TooManyRequestsException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
@@ -179,6 +180,18 @@ class GlobalExceptionHandlerTests {
     }
 
     @Test
+    void rateLimitIs429WithRetryAfterRoundedUpToWholeSeconds() throws Exception {
+        expectApiError(mvc.perform(get("/test/rate-limited")), 429, "Too Many Requests", "/test/rate-limited")
+                .andExpect(header().string("Retry-After", "3"));
+    }
+
+    @Test
+    void anUnknownSortPropertyIs400() throws Exception {
+        expectApiError(mvc.perform(get("/test/bad-sort")), 400, "Bad Request", "/test/bad-sort")
+                .andExpect(jsonPath("$.message").value("cannot sort by 'passwordHash'"));
+    }
+
+    @Test
     void accessDeniedIs403() throws Exception {
         expectApiError(mvc.perform(get("/test/forbidden")), 403, "Forbidden", "/test/forbidden");
     }
@@ -247,6 +260,17 @@ class GlobalExceptionHandlerTests {
         @GetMapping("/test/unauthenticated")
         void unauthenticated() {
             throw new InsufficientAuthenticationException("Jwt expired at 2026-01-01T00:00:00Z");
+        }
+
+        @GetMapping("/test/rate-limited")
+        void rateLimited() {
+            throw new TooManyRequestsException(java.time.Duration.ofMillis(2_100));
+        }
+
+        @GetMapping("/test/bad-sort")
+        void badSort() {
+            throw new org.springframework.data.core.PropertyReferenceException("passwordHash",
+                    org.springframework.data.core.TypeInformation.of(SampleRequest.class), java.util.List.of());
         }
 
         @GetMapping("/test/forbidden")

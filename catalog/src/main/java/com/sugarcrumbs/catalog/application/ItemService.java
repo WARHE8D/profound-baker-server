@@ -61,6 +61,23 @@ public class ItemService {
     }
 
     /**
+     * An item as shoppers may see it: hidden (unavailable) items are a 404 exactly like
+     * unknown ids, so the storefront never reveals what the Owner has withdrawn.
+     */
+    @Transactional(readOnly = true)
+    public Item getVisibleOrThrow(UUID id) {
+        return itemRepository.findById(id)
+                .filter(Item::isAvailable)
+                .orElseThrow(() -> NotFoundException.forEntity("Item", id));
+    }
+
+    /** The storefront listing: only available items (sold-out ones included, marked not orderable). */
+    @Transactional(readOnly = true)
+    public Page<Item> searchVisible(UUID categoryId, String searchText, Pageable pageable) {
+        return search(categoryId, true, searchText, pageable);
+    }
+
+    /**
      * All three filters are optional and independent — see
      * {@link ItemSpecifications#combine} for how they compose. Paginated
      * by design: an owner's menu is small today, but nothing here breaks
