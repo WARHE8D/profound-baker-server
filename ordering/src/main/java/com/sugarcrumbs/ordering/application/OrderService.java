@@ -27,9 +27,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -38,6 +42,9 @@ public class OrderService {
 
     /** A clash among 33.5M references is already rare; several in a row means something is broken. */
     private static final int REFERENCE_ATTEMPTS = 5;
+
+    /** Longer than any reference, name, email or phone it could match. */
+    static final int MAX_SEARCH_LENGTH = 100;
 
     private final OrderRepository orderRepository;
     private final WorkingHoursRepository workingHoursRepository;
@@ -119,10 +126,22 @@ public class OrderService {
                 .orElseThrow(() -> NotFoundException.forEntity("Order", id));
     }
 
-    /** The owner's calendar: any combination of pickup range and status, all optional. */
+    /**
+     * The Owner's calendar and order list: pickup range (either end may be open), any of
+     * several statuses and a free-text search on the reference and guest contact, all optional.
+     *
+     * @throws IllegalArgumentException (400) if {@code from} isn't before {@code to}, or the search is too long
+     */
     @Transactional(readOnly = true)
-    public Page<Order> calendar(Instant from, Instant to, OrderStatus status, Pageable pageable) {
-        return orderRepository.findAll(OrderSpecifications.combine(from, to, status), pageable);
+    public Page<Order> calendar(Instant from, Instant to, Collection<OrderStatus> statuses, String search,
+                                Pageable pageable) {
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw new IllegalArgumentException("from must be before to");
+        }
+        if (search != null && search.length() > MAX_SEARCH_LENGTH) {
+            throw new IllegalArgumentException("search may be at most " + MAX_SEARCH_LENGTH + " characters");
+        }
+        return orderRepository.findAll(OrderSpecifications.combine(from, to, statuses, search), pageable);
     }
 
     public Order confirm(UUID id) {
@@ -143,11 +162,98 @@ public class OrderService {
         return order;
     }
 
-    /** Covers both rejecting a pending order and cancelling a confirmed one until #16 adds REJECTED. */
+    /**
+     * The Owner turns down a pending order; its slot and stock go back at once.
+     *
+     * @throws IllegalStateException (400) if the order isn't pending
+     */
+    public Order reject(UUID id, String reason) {
+        Order order = getOrThrow(id);
+        order.reject(reason);
+        releaseStock(order);
+        return order;
+    }
+
+    /**
+     * The Owner calls off an order they had confirmed. A pending one is rejected instead, so
+     * reports never count an Owner's refusal as a cancellation.
+     *
+     * @throws IllegalStateException (400) if the order is pending, or already finished
+     */
     public Order cancel(UUID id, String reason) {
         Order order = getOrThrow(id);
+        if (order.getStatus() == OrderStatus.PENDING) {
+            throw new IllegalStateException("a pending order is rejected, not cancelled");
+        }
         order.cancel(reason);
         releaseStock(order);
+        return order;
+    }
+
+    /** @throws IllegalStateException (400) unless the order is pending */
+    public Order updateNotes(UUID id, String notes) {
+        Order order = getOrThrow(id);
+        order.updateNotes(notes == null || notes.isBlank() ? null : notes.strip());
+        return order;
+    }
+
+    /**
+     * Replaces a pending order's lines with {@code lines}, the full list wanted (see
+     * {@link Order#editLines}). Items already on the order keep the price the guest saw; new
+     * ones are snapshotted from the catalog now and must be orderable. The checkout limits still
+     * apply, but, as with a reschedule, the Owner may waive lead time. Stock moves by the
+     * difference only, so an unchanged line neither takes nor returns any.
+     *
+     * @throws NotFoundException  (404) if a new item doesn't exist
+     * @throws ConflictException  (409) if a new item can't be ordered
+     * @throws IllegalArgumentException (400) for too many lines or units, a repeated item or too little stock
+     * @throws IllegalStateException    (400) unless the order is pending
+     */
+    public Order editLines(UUID id, List<OrderLineRequest> lines) {
+        checkLimits(lines);
+        Order order = getOrThrow(id);
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new IllegalStateException("cannot edit the lines of an order in status " + order.getStatus());
+        }
+        Map<UUID, Integer> before = quantitiesByItem(order);
+
+        Map<UUID, OrderLine> onOrder = new HashMap<>();
+        order.getLines().stream().filter(line -> line.getItemId() != null)
+                .forEach(line -> onOrder.put(line.getItemId(), line));
+        List<UUID> newItemIds = lines.stream().map(OrderLineRequest::itemId)
+                .filter(itemId -> !onOrder.containsKey(itemId)).distinct().toList();
+        Map<UUID, ItemSnapshot> newItems = newItemIds.isEmpty() ? Map.of() : catalogApi.getItems(newItemIds);
+
+        List<Order.LineDraft> drafts = new ArrayList<>();
+        for (OrderLineRequest line : lines) {
+            OrderLine existing = onOrder.get(line.itemId());
+            if (existing != null) {
+                drafts.add(new Order.LineDraft(existing.getItemId(), existing.getItemName(), existing.getUnitPrice(),
+                        line.quantity()));
+                continue;
+            }
+            ItemSnapshot item = newItems.get(line.itemId());
+            if (item == null) {
+                throw NotFoundException.forEntity("Item", line.itemId());
+            }
+            if (!item.orderable()) {
+                throw new ConflictException("item '" + item.name() + "' is not currently available");
+            }
+            drafts.add(new Order.LineDraft(item.id(), item.name(), item.price(), line.quantity()));
+        }
+        order.editLines(drafts);
+
+        Map<UUID, Integer> after = quantitiesByItem(order);
+        Set<UUID> touched = new HashSet<>(before.keySet());
+        touched.addAll(after.keySet());
+        for (UUID itemId : touched) {
+            int delta = after.getOrDefault(itemId, 0) - before.getOrDefault(itemId, 0);
+            if (delta > 0) {
+                catalogApi.reserveStock(itemId, delta);
+            } else if (delta < 0) {
+                catalogApi.releaseStock(itemId, -delta);
+            }
+        }
         return order;
     }
 
@@ -244,6 +350,17 @@ public class OrderService {
             }
         }
         throw new IllegalStateException("could not generate a unique order reference");
+    }
+
+    /** Lines whose item no longer exists in the catalog are left out: there is no stock to move. */
+    private static Map<UUID, Integer> quantitiesByItem(Order order) {
+        Map<UUID, Integer> quantities = new HashMap<>();
+        for (OrderLine line : order.getLines()) {
+            if (line.getItemId() != null) {
+                quantities.put(line.getItemId(), line.getQuantity());
+            }
+        }
+        return quantities;
     }
 
     /** Lines whose item no longer exists in the catalog have nothing to put back. */

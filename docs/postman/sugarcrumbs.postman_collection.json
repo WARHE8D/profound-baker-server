@@ -1553,6 +1553,57 @@
           }
         },
         {
+          "name": "Search orders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders?q=postman&status=PENDING&status=CONFIRMED&page=0&size=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "postman"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                },
+                {
+                  "key": "status",
+                  "value": "CONFIRMED"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Case-insensitive search on the reference and the guest's name, email and phone. `status` may repeat; `from`/`to` may each be left out."
+          }
+        },
+        {
           "name": "Get order",
           "event": [
             {
@@ -1813,6 +1864,127 @@
           }
         },
         {
+          "name": "Edit order lines",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/lines",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "lines"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"itemId\": \"{{itemId}}\", \"quantity\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "PENDING only. The full list of lines wanted: items left out are removed. Items already on the order keep the price the guest saw; stock moves by the difference."
+          }
+        },
+        {
+          "name": "Edit order notes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "notes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Please write 'Happy 40th'\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "PENDING only. Blank or absent clears the notes."
+          }
+        },
+        {
+          "name": "Accept order before cancelling",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "orders",
+                "{{orderId}}",
+                "confirm"
+              ]
+            },
+            "description": "Only a confirmed order is cancelled; a pending one is rejected."
+          }
+        },
+        {
           "name": "Cancel order",
           "event": [
             {
@@ -1854,7 +2026,7 @@
                 }
               }
             },
-            "description": "Releases slot capacity and tracked stock."
+            "description": "CONFIRMED/IN_PROGRESS \u2192 CANCELLED. A pending order is rejected instead (400). Releases slot capacity and tracked stock."
           }
         },
         {
@@ -1936,7 +2108,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('order is REJECTED', () => pm.expect(pm.response.json().status).to.eql('REJECTED'));"
                 ]
               }
             }
@@ -1950,7 +2123,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/orders/{{orderId}}/cancel",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/reject",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1958,7 +2131,7 @@
                 "api",
                 "orders",
                 "{{orderId}}",
-                "cancel"
+                "reject"
               ]
             },
             "body": {
@@ -1970,7 +2143,7 @@
                 }
               }
             },
-            "description": "PENDING \u2192 CANCELLED with a reason. A distinct REJECTED status is planned (#16)."
+            "description": "PENDING \u2192 REJECTED with a required reason. Releases slot capacity and tracked stock."
           }
         }
       ],

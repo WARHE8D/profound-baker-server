@@ -64,8 +64,8 @@ class AvailabilityServiceTests {
 
         service.computeForDate(DAY);
 
-        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
-                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"), OrderStatus.CANCELLED);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"), OrderStatus.WITHDRAWN);
     }
 
     /** Daylight saving: the same 09:00 slot is 09:00Z in London's winter and 08:00Z in its summer. */
@@ -78,10 +78,10 @@ class AvailabilityServiceTests {
         service.computeForRange(DAY, DAY);
         service.computeForRange(summerTuesday, summerTuesday);
 
-        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
-                Instant.parse("2026-12-01T09:00:00Z"), Instant.parse("2026-12-01T09:30:00Z"), OrderStatus.CANCELLED);
-        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
-                Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), OrderStatus.CANCELLED);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(
+                Instant.parse("2026-12-01T09:00:00Z"), Instant.parse("2026-12-01T09:30:00Z"), OrderStatus.WITHDRAWN);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(
+                Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), OrderStatus.WITHDRAWN);
     }
 
     @Test
@@ -143,7 +143,7 @@ class AvailabilityServiceTests {
     @Test
     void ordersReduceRemainingCapacityAndAFullSlotIsNotBookable() {
         open("09:00", "10:00", 30, 2);
-        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(any(), any(), any()))
                 .thenReturn(1L, 2L);
 
         List<TimeSlotResponse> slots = service.computeForDate(DAY).slots();
@@ -157,7 +157,7 @@ class AvailabilityServiceTests {
     @Test
     void anOverbookedSlotReportsZeroRemainingNotANegativeNumber() {
         open("09:00", "09:30", 30, 1);
-        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(any(), any(), any()))
                 .thenReturn(3L);
 
         assertThat(service.computeForDate(DAY).slots().getFirst().remainingCapacity()).isZero();
@@ -167,9 +167,9 @@ class AvailabilityServiceTests {
     void rescheduleChecksLeaveTheOrderItselfOutOfTheCount() {
         open("09:00", "09:30", 30, 1);
         UUID orderId = UUID.randomUUID();
-        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotAndIdNot(
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotInAndIdNot(
                 any(), any(), any(), eq(orderId))).thenReturn(0L);
-        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(any(), any(), any()))
                 .thenReturn(1L);
 
         assertThat(service.computeForDate(DAY, orderId).slots().getFirst().bookable()).isTrue();
