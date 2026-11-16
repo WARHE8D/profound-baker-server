@@ -5,6 +5,7 @@ import com.sugarcrumbs.catalog.ItemSnapshot;
 import com.sugarcrumbs.common.exception.ConflictException;
 import com.sugarcrumbs.common.exception.NotFoundException;
 import com.sugarcrumbs.identity.OwnerApi;
+import com.sugarcrumbs.ordering.config.OrderProperties;
 import com.sugarcrumbs.ordering.domain.GuestContact;
 import com.sugarcrumbs.ordering.domain.Order;
 import com.sugarcrumbs.ordering.domain.OrderLine;
@@ -12,6 +13,7 @@ import com.sugarcrumbs.ordering.domain.OrderReference;
 import com.sugarcrumbs.ordering.domain.OrderStatus;
 import com.sugarcrumbs.ordering.persistence.OrderRepository;
 import com.sugarcrumbs.ordering.persistence.OrderSpecifications;
+import com.sugarcrumbs.ordering.persistence.WorkingHoursRepository;
 import com.sugarcrumbs.ordering.web.dto.CheckoutRequest;
 import com.sugarcrumbs.ordering.web.dto.DayAvailabilityResponse;
 import com.sugarcrumbs.ordering.web.dto.OrderLineRequest;
@@ -38,28 +40,37 @@ public class OrderService {
     private static final int REFERENCE_ATTEMPTS = 5;
 
     private final OrderRepository orderRepository;
+    private final WorkingHoursRepository workingHoursRepository;
     private final CatalogApi catalogApi;
     private final AvailabilityService availabilityService;
     private final OwnerApi ownerApi;
+    private final OrderProperties properties;
 
-    public OrderService(OrderRepository orderRepository, CatalogApi catalogApi,
-                        AvailabilityService availabilityService, OwnerApi ownerApi) {
+    public OrderService(OrderRepository orderRepository, WorkingHoursRepository workingHoursRepository,
+                        CatalogApi catalogApi, AvailabilityService availabilityService, OwnerApi ownerApi,
+                        OrderProperties properties) {
         this.orderRepository = orderRepository;
+        this.workingHoursRepository = workingHoursRepository;
         this.catalogApi = catalogApi;
         this.availabilityService = availabilityService;
         this.ownerApi = ownerApi;
+        this.properties = properties;
     }
 
     /**
-     * Guest checkout. Looks up every item in one batch, copies each one's current name and
-     * price into its line, checks the pickup slot, then reserves stock per line. The order's
-     * lead time is the longest of its items'.
+     * Guest checkout. Checks the order's size against {@code app.order.*}, looks up every item
+     * in one batch, copies each one's current name and price into its line, checks the pickup
+     * slot under a lock (see {@link #ensureSlotIsBookable}), then reserves stock per line. The
+     * order's lead time is the longest of its items'.
      *
      * @throws NotFoundException  (404) if an item doesn't exist
      * @throws ConflictException  (409) if an item can't be ordered or the slot isn't bookable
-     * @throws IllegalArgumentException (400) for a repeated item or too little notice
+     * @throws IllegalArgumentException (400) for too many lines or units, a repeated item, a pickup
+     *                                  time that isn't in the future, too little notice or too little stock
      */
     public Order place(CheckoutRequest request) {
+        checkLimits(request.lines());
+        requireFuture(request.pickupAt());
         List<UUID> itemIds = request.lines().stream().map(OrderLineRequest::itemId).toList();
         if (new HashSet<>(itemIds).size() != itemIds.size()) {
             throw new IllegalArgumentException("each item may appear only once in an order");
@@ -140,7 +151,12 @@ public class OrderService {
         return order;
     }
 
+    /**
+     * Moves an order to another slot. The Owner may waive the items' lead time, but the new
+     * slot must still be in the future and have room.
+     */
     public Order reschedule(UUID id, Instant newPickupAt) {
+        requireFuture(newPickupAt);
         Order order = getOrThrow(id);
         ensureSlotIsBookable(newPickupAt, order.getId());
         order.reschedule(newPickupAt);
@@ -162,12 +178,50 @@ public class OrderService {
         return stale.size();
     }
 
+    /** Checked before any catalog lookup, so an oversized order costs nothing but this loop. */
+    private void checkLimits(List<OrderLineRequest> lines) {
+        if (lines.size() > properties.maxLines()) {
+            throw new IllegalArgumentException(
+                    "an order may contain at most " + properties.maxLines() + " different items");
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).quantity() > properties.maxQuantityPerLine()) {
+                throw new IllegalArgumentException("line " + (i + 1) + ": at most "
+                        + properties.maxQuantityPerLine() + " of one item per order");
+            }
+        }
+    }
+
+    /**
+     * Checked here as well as by {@code @Future} on the request: an item with no lead time
+     * would otherwise let a guest book a slot that has already started, and the service
+     * must not depend on its caller having validated.
+     */
+    private static void requireFuture(Instant pickupAt) {
+        if (!pickupAt.isAfter(Instant.now())) {
+            throw new IllegalArgumentException("pickupAt must be in the future");
+        }
+    }
+
+    /**
+     * Rejects a pickup time that isn't the start of a slot with room left.
+     *
+     * <p>Counting a slot's orders and then inserting one is a check-then-act race: two guests
+     * could both see the last place free. So this first locks the day's {@code WorkingHours} row
+     * ({@link WorkingHoursRepository#findForUpdate}) and counts only once it holds the lock; the
+     * lock lasts until the caller's transaction commits its order, so the next checkout or
+     * reschedule into that day waits and then sees it. The lock is per weekday, which serialises
+     * every booking on, say, all Tuesdays: one bakery's checkouts are rare enough for that not to
+     * matter, and it's the row that holds the capacity. A closed day has no row to lock, and is
+     * rejected below anyway.
+     */
     private void ensureSlotIsBookable(Instant pickupAt, UUID excludeOrderId) {
         // Slots are local times in the bakery's zone, not the server's.
         ZonedDateTime local = pickupAt.atZone(ownerApi.settings().timeZone());
         LocalDate date = local.toLocalDate();
         LocalTime time = local.toLocalTime().withSecond(0).withNano(0);
 
+        workingHoursRepository.findForUpdate(ownerApi.currentOwnerId(), date.getDayOfWeek());
         DayAvailabilityResponse day = availabilityService.computeForDate(date, excludeOrderId);
         if (!day.open()) {
             String suffix = day.reason() != null ? " (" + day.reason() + ")" : "";

@@ -1,8 +1,8 @@
 package com.sugarcrumbs.ordering.application;
 
+import com.sugarcrumbs.ordering.config.OrderProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -25,10 +25,9 @@ public class StaleOrderCleanupJob {
     private final OrderService orderService;
     private final int pendingHoldHours;
 
-    public StaleOrderCleanupJob(OrderService orderService,
-                                @Value("${app.order.pending-hold-hours:24}") int pendingHoldHours) {
+    public StaleOrderCleanupJob(OrderService orderService, OrderProperties properties) {
         this.orderService = orderService;
-        this.pendingHoldHours = pendingHoldHours;
+        this.pendingHoldHours = properties.pendingHoldHours();
     }
 
     @Scheduled(cron = "0 */15 * * * *")

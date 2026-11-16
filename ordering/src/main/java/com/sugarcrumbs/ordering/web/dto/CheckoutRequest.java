@@ -15,12 +15,13 @@ import java.util.List;
  * client; they are copied from the catalog at checkout.
  *
  * @param pickupAt the start of a bookable slot from {@code GET /api/public/availability}
- * @param lines    each item at most once; the cap only bounds the request, #15 sets the business limit
+ * @param lines    each item at most once; at most {@code app.order.max-lines} lines (default 20) of at most
+ *                 {@code app.order.max-quantity-per-line} units each (default 100), checked by {@code OrderService}
  */
 public record CheckoutRequest(
         @NotNull @Future Instant pickupAt,
         @NotNull @Valid GuestContactRequest guestContact,
         @Size(max = 1000) String notes,
-        @NotEmpty @Size(max = 50) List<@NotNull @Valid OrderLineRequest> lines
+        @NotEmpty List<@NotNull @Valid OrderLineRequest> lines
 ) {
 }

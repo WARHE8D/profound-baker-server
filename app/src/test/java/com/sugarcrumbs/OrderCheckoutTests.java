@@ -19,6 +19,8 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Multi-item checkout (#14): every line keeps the name and price it had at
  * checkout, the order gets a human-readable reference, and stock is taken and
  * returned per line.
+ *
+ * Checkout rules (#15): configurable limits on lines and units, and no pickup in the past.
  *
  * <p>Each test picks its own pickup day, opened for that weekday with plenty of
  * capacity, so tests never compete for a slot in the shared database.
@@ -171,6 +175,47 @@ class OrderCheckoutTests extends AbstractIntegrationTest {
 
         assertThat(checkout.getStatusCode().value()).isEqualTo(400);
         assertThat((String) checkout.getBody().get("message")).contains("9600 hours notice");
+    }
+
+    /** The defaults from application.properties: 20 distinct items, 100 of each (#15). */
+    @Test
+    @SuppressWarnings("unchecked")
+    void ordersOverTheConfiguredLimitsAre400WithAClearMessage() {
+        LocalDate day = LocalDate.now(ZoneOffset.UTC).plusDays(57);
+        Map<String, Object>[] tooManyLines = IntStream.range(0, 21)
+                .mapToObj(i -> line(UUID.randomUUID().toString(), 1)).toArray(Map[]::new);
+
+        ResponseEntity<Map> lines = checkout(day, tooManyLines);
+        ResponseEntity<Map> units = checkout(day, line(UUID.randomUUID().toString(), 101));
+
+        assertThat(lines.getStatusCode().value()).isEqualTo(400);
+        assertThat((String) lines.getBody().get("message")).isEqualTo("an order may contain at most 20 different items");
+        assertThat(units.getStatusCode().value()).isEqualTo(400);
+        assertThat((String) units.getBody().get("message")).isEqualTo("line 1: at most 100 of one item per order");
+    }
+
+    @Test
+    void aPickupInThePastIs400ForCheckoutAndReschedule() {
+        String bread = createItem("Baguette", "3.00", null);
+        LocalDate day = openDay(58);
+        String yesterday = LocalDate.now(ZoneOffset.UTC).minusDays(1) + "T09:00:00Z";
+
+        ResponseEntity<Map> pastCheckout = shopper.post().uri("/api/public/orders")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of(
+                        "pickupAt", yesterday,
+                        "lines", List.of(line(bread, 1)),
+                        "guestContact", Map.of("name", "Guest", "email", "guest@example.com", "phone", "555-0100")))
+                .retrieve().toEntity(Map.class);
+        assertThat(pastCheckout.getStatusCode().value()).isEqualTo(400);
+
+        Object orderId = checkout(day, line(bread, 1)).getBody().get("id");
+        ResponseEntity<Map> pastReschedule = owner.put().uri("/api/orders/{id}/schedule", orderId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("pickupAt", yesterday))
+                .retrieve().toEntity(Map.class);
+        assertThat(pastReschedule.getStatusCode().value()).isEqualTo(400);
+        Map<String, Object> unchanged = owner.get().uri("/api/orders/{id}", orderId).retrieve().body(Map.class);
+        assertThat(unchanged.get("pickupAt")).isEqualTo(day + "T09:00:00Z");
     }
 
     // ---- helpers ----
