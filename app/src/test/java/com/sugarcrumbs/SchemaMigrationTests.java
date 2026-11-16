@@ -51,7 +51,7 @@ class SchemaMigrationTests extends AbstractIntegrationTest {
         assertThat(tables).containsExactlyInAnyOrder(
                 "identity.owners", "identity.refresh_tokens",
                 "catalog.categories", "catalog.items", "catalog.item_images",
-                "ordering.working_hours", "ordering.blocked_dates", "ordering.bookings", "ordering.invoices");
+                "ordering.working_hours", "ordering.blocked_dates", "ordering.orders", "ordering.order_lines", "ordering.invoices");
     }
 
     @Test

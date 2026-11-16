@@ -12,24 +12,21 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * The billing record for a {@link Booking}.
+ * The billing record for an {@link Order}.
  *
- * <p><b>Why {@code subtotal} is stored, not computed from the item's
- * current price:</b> {@code Item.price} can change after a booking is
- * made (a menu repricing shouldn't retroactively change what a past
- * customer owes). The invoice takes a snapshot of the price at the
- * moment it's issued, exactly like a paper receipt would — this is the
- * standard pattern for any monetary record tied to a mutable catalog.
+ * <p><b>Why {@code subtotal} is stored:</b> it is taken from the order's
+ * line snapshots when the invoice is issued, so neither a later menu
+ * repricing nor an edit to the order changes what an issued invoice says.
  *
- * <p>One invoice per booking, enforced by a unique FK — this is
- * deliberately a {@code @OneToOne}, not a {@code @OneToMany}, since this
- * system doesn't support partial/split invoicing of a single booking.
+ * <p>One invoice per order, enforced by a unique FK: deliberately a
+ * {@code @OneToOne}, since this system doesn't split one order across
+ * several invoices.
  */
 @Entity
 @Table(
         schema = "ordering",
         name = "invoices",
-        uniqueConstraints = @UniqueConstraint(name = "uk_invoices_booking", columnNames = "booking_id"),
+        uniqueConstraints = @UniqueConstraint(name = "uk_invoices_order", columnNames = "order_id"),
         indexes = @Index(name = "idx_invoices_status", columnList = "status")
 )
 public class Invoice extends BaseEntity {
@@ -38,10 +35,10 @@ public class Invoice extends BaseEntity {
 
     @NotNull
     @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "booking_id", nullable = false, foreignKey = @ForeignKey(name = "fk_invoices_booking"))
-    private Booking booking;
+    @JoinColumn(name = "order_id", nullable = false, foreignKey = @ForeignKey(name = "fk_invoices_order"))
+    private Order order;
 
-    /** Snapshot of item price × quantity at the time this invoice was issued. */
+    /** The order's subtotal (sum of its line snapshots) when this invoice was issued. */
     @NotNull
     @DecimalMin(value = "0.00")
     @Column(name = "subtotal", nullable = false, precision = 10, scale = AMOUNT_SCALE)
@@ -74,7 +71,7 @@ public class Invoice extends BaseEntity {
     }
 
     private Invoice(Builder builder) {
-        this.booking = Objects.requireNonNull(builder.booking, "booking is required");
+        this.order = Objects.requireNonNull(builder.order, "order is required");
         this.subtotal = normalize(Objects.requireNonNull(builder.subtotal, "subtotal is required"));
         if (builder.discountAmount != null) {
             applyDiscount(builder.discountAmount);
@@ -136,8 +133,8 @@ public class Invoice extends BaseEntity {
 
     // ---- Getters only ----
 
-    public Booking getBooking() {
-        return booking;
+    public Order getOrder() {
+        return order;
     }
 
     public BigDecimal getSubtotal() {
@@ -170,15 +167,15 @@ public class Invoice extends BaseEntity {
     }
 
     public static final class Builder {
-        private Booking booking;
+        private Order order;
         private BigDecimal subtotal;
         private BigDecimal discountAmount;
 
         private Builder() {
         }
 
-        public Builder booking(Booking booking) {
-            this.booking = booking;
+        public Builder order(Order order) {
+            this.order = order;
             return this;
         }
 

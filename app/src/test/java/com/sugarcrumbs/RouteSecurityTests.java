@@ -54,13 +54,13 @@ class RouteSecurityTests extends AbstractIntegrationTest {
 
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource({
-            "GET,    /api/bookings",
-            "GET,    /api/bookings/" + ID,
-            "PATCH,  /api/bookings/" + ID + "/confirm",
-            "PATCH,  /api/bookings/" + ID + "/start-preparation",
-            "PATCH,  /api/bookings/" + ID + "/fulfill",
-            "PATCH,  /api/bookings/" + ID + "/cancel",
-            "PUT,    /api/bookings/" + ID + "/schedule",
+            "GET,    /api/orders",
+            "GET,    /api/orders/" + ID,
+            "PATCH,  /api/orders/" + ID + "/confirm",
+            "PATCH,  /api/orders/" + ID + "/start-preparation",
+            "PATCH,  /api/orders/" + ID + "/fulfill",
+            "PATCH,  /api/orders/" + ID + "/cancel",
+            "PUT,    /api/orders/" + ID + "/schedule",
             "GET,    /api/catalogue/items",
             "GET,    /api/catalogue/items/" + ID,
             "POST,   /api/catalogue/items",
@@ -90,7 +90,9 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "POST,   /api/owner/password",
             // The old public paths are gone, and the public prefix allows no other writes.
             "GET,    /api/items",
+            "GET,    /api/bookings",
             "POST,   /api/bookings",
+            "POST,   /api/orders",
             "PUT,    /api/public/catalogue/items/" + ID,
             "DELETE, /api/public/catalogue/items/" + ID,
             "POST,   /api/public/availability",

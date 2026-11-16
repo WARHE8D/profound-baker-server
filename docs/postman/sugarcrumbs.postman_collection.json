@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "SugarCrumbs API (local)",
-    "description": "Local API for the SugarCrumbs baker backend (modular monolith).\n\n**Auth:** run *Auth \u2192 Log in* first (set `ownerEmail`/`ownerPassword` to your `APP_OWNER_EMAIL`/`APP_OWNER_INITIAL_PASSWORD`). Owner routes need the saved Bearer token; shopper routes live under `/api/public/**` and need none. Login is rate-limited to 5 per minute per IP, guest checkout to 10 per 10 minutes.\n\n**Suggested order:** Auth \u2192 Log in; Catalogue \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Bookings \u2192 Guest checkout \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, bookingId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Booking times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, booked item and bookings in the DB: booked items can't be deleted until #14.",
+    "description": "Local API for the SugarCrumbs baker backend (modular monolith).\n\n**Auth:** run *Auth \u2192 Log in* first (set `ownerEmail`/`ownerPassword` to your `APP_OWNER_EMAIL`/`APP_OWNER_INITIAL_PASSWORD`). Owner routes need the saved Bearer token; shopper routes live under `/api/public/**` and need none. Login is rate-limited to 5 per minute per IP, guest checkout to 10 per 10 minutes.\n\n**Suggested order:** Auth \u2192 Log in; Catalogue \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Orders \u2192 Guest checkout \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, orderId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Pickup times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, ordered item and orders in the DB: ordered items can't be deleted until #14.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -17,7 +17,7 @@
           "pm.collectionVariables.set('tomorrow', ymd(plusDays(1)));",
           "pm.collectionVariables.set('dayAfterTomorrow', ymd(plusDays(2)));",
           "pm.collectionVariables.set('nextWeek', ymd(plusDays(7)));",
-          "// The server reads booking times in its own zone (same machine), so send the local offset.",
+          "// The server reads order times in its own zone (same machine), so send the local offset.",
           "const off = -new Date().getTimezoneOffset();",
           "pm.collectionVariables.set('tzOffset', `${off >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`);"
         ]
@@ -38,7 +38,7 @@
       "value": ""
     },
     {
-      "key": "bookingId",
+      "key": "orderId",
       "value": ""
     },
     {
@@ -407,7 +407,7 @@
                     }
                   }
                 },
-                "description": "Throwaway category for the delete request below. The main `categoryId` is kept because items and bookings later in the run depend on it. Saves `tmpCategoryId`."
+                "description": "Throwaway category for the delete request below. The main `categoryId` is kept because items and orders later in the run depend on it. Saves `tmpCategoryId`."
               }
             },
             {
@@ -921,7 +921,7 @@
                     "{{itemId}}"
                   ]
                 },
-                "description": "409 if any booking references the item; mark it unavailable instead."
+                "description": "409 if any order references the item; mark it unavailable instead."
               }
             }
           ]
@@ -1374,10 +1374,10 @@
       "description": "Working hours + blocked dates decide which slots guests can book."
     },
     {
-      "name": "Bookings (orders)",
+      "name": "Orders",
       "item": [
         {
-          "name": "Create item to book",
+          "name": "Create item to order",
           "event": [
             {
               "listen": "test",
@@ -1421,7 +1421,7 @@
                 }
               }
             },
-            "description": "The Items folder deletes its item, so bookings get a fresh one (lead time 0, available). Saves `itemId`."
+            "description": "The Items folder deletes its item, so orders get a fresh one (lead time 0, available). Saves `itemId`."
           }
         },
         {
@@ -1457,8 +1457,8 @@
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "if (pm.response.code === 201) {",
-                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
-                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "    console.log('orderId =', pm.collectionVariables.get('orderId'));",
                   "}"
                 ]
               }
@@ -1485,18 +1485,18 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "raw": "{\n  \"pickupAt\": \"{{slotAt}}\",\n  \"lines\": [\n    { \"itemId\": \"{{itemId}}\", \"quantity\": 1 }\n  ],\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "`scheduledFor` must be the start of a bookable slot. Saves `bookingId`."
+            "description": "`pickupAt` must be the start of a bookable slot. Saves `orderId`."
           }
         },
         {
-          "name": "List bookings (owner view)",
+          "name": "List orders (owner view)",
           "event": [
             {
               "listen": "test",
@@ -1512,13 +1512,13 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings?status=PENDING&from={{tomorrow}}T00:00:00{{tzOffset}}&to={{nextWeek}}T00:00:00{{tzOffset}}&page=0&size=50",
+              "raw": "{{baseUrl}}/api/orders?status=PENDING&from={{tomorrow}}T00:00:00{{tzOffset}}&to={{nextWeek}}T00:00:00{{tzOffset}}&page=0&size=50",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings"
+                "orders"
               ],
               "query": [
                 {
@@ -1553,7 +1553,7 @@
           }
         },
         {
-          "name": "Get booking",
+          "name": "Get order",
           "event": [
             {
               "listen": "test",
@@ -1569,20 +1569,20 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}"
+                "orders",
+                "{{orderId}}"
               ]
             }
           }
         },
         {
-          "name": "Accept booking",
+          "name": "Accept order",
           "event": [
             {
               "listen": "test",
@@ -1598,14 +1598,14 @@
             "method": "PATCH",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/confirm",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/confirm",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "confirm"
               ]
             },
@@ -1629,14 +1629,14 @@
             "method": "PATCH",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/start-preparation",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/start-preparation",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "start-preparation"
               ]
             },
@@ -1660,14 +1660,14 @@
             "method": "PATCH",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/fulfill",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/fulfill",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "fulfill"
               ]
             },
@@ -1707,8 +1707,8 @@
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "if (pm.response.code === 201) {",
-                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
-                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "    console.log('orderId =', pm.collectionVariables.get('orderId'));",
                   "}"
                 ]
               }
@@ -1735,18 +1735,18 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "raw": "{\n  \"pickupAt\": \"{{slotAt}}\",\n  \"lines\": [\n    { \"itemId\": \"{{itemId}}\", \"quantity\": 1 }\n  ],\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Second booking (PENDING) used for reschedule and cancel. Saves `bookingId`."
+            "description": "Second order (PENDING) used for reschedule and cancel. Saves `orderId`."
           }
         },
         {
-          "name": "Reschedule booking",
+          "name": "Reschedule order",
           "event": [
             {
               "listen": "prerequest",
@@ -1790,20 +1790,20 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/schedule",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/schedule",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "schedule"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"scheduledFor\": \"{{rescheduleAt}}\"\n}",
+              "raw": "{\n  \"pickupAt\": \"{{rescheduleAt}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1813,7 +1813,7 @@
           }
         },
         {
-          "name": "Cancel booking",
+          "name": "Cancel order",
           "event": [
             {
               "listen": "test",
@@ -1834,14 +1834,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/cancel",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/cancel",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "cancel"
               ]
             },
@@ -1890,8 +1890,8 @@
                 "exec": [
                   "pm.test('status is 201', () => pm.response.to.have.status(201));",
                   "if (pm.response.code === 201) {",
-                  "    pm.collectionVariables.set('bookingId', pm.response.json().id);",
-                  "    console.log('bookingId =', pm.collectionVariables.get('bookingId'));",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "    console.log('orderId =', pm.collectionVariables.get('orderId'));",
                   "}"
                 ]
               }
@@ -1918,18 +1918,18 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"itemId\": \"{{itemId}}\",\n  \"quantity\": 1,\n  \"scheduledFor\": \"{{slotAt}}\",\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
+              "raw": "{\n  \"pickupAt\": \"{{slotAt}}\",\n  \"lines\": [\n    { \"itemId\": \"{{itemId}}\", \"quantity\": 1 }\n  ],\n  \"guestContact\": {\n    \"name\": \"Postman Guest\",\n    \"email\": \"guest@example.com\",\n    \"phone\": \"+920000000002\"\n  },\n  \"notes\": \"Please write 'Happy Birthday'\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Third booking (PENDING) for the owner to reject. Saves `bookingId`."
+            "description": "Third order (PENDING) for the owner to reject. Saves `orderId`."
           }
         },
         {
-          "name": "Reject booking",
+          "name": "Reject order",
           "event": [
             {
               "listen": "test",
@@ -1950,14 +1950,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/bookings/{{bookingId}}/cancel",
+              "raw": "{{baseUrl}}/api/orders/{{orderId}}/cancel",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "bookings",
-                "{{bookingId}}",
+                "orders",
+                "{{orderId}}",
                 "cancel"
               ]
             },
@@ -2008,7 +2008,7 @@
                 "{{itemId}}"
               ]
             },
-            "description": "Bookings still reference this item, so `ItemReferenceGuard` refuses the delete. That stops once orders keep snapshots and items are soft-deleted (#14)."
+            "description": "Orders still reference this item, so `ItemReferenceGuard` refuses the delete. That stops once orders keep snapshots and items are soft-deleted (#14)."
           }
         },
         {

@@ -101,16 +101,54 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void bookingStatusMustBeAKnownValue() {
-        assertViolates("ck_bookings_status", () -> insertBooking("SHIPPED"));
+    void orderStatusMustBeAKnownValue() {
+        assertViolates("ck_orders_status", () -> insertOrder("SHIPPED", "SC-AAAA1"));
     }
 
     @Test
-    void bookingHasAtMostOneInvoice() {
-        UUID booking = insertBooking("CONFIRMED");
-        insertInvoice(booking);
+    void orderReferenceIsUnique() {
+        insertOrder("PENDING", "SC-AAAA2");
 
-        assertViolates("uk_invoices_booking", () -> insertInvoice(booking));
+        assertViolates("uk_orders_reference", () -> insertOrder("PENDING", "SC-AAAA2"));
+    }
+
+    @Test
+    void anOrderLineTotalMustBeUnitPriceTimesQuantity() {
+        UUID order = insertOrder("PENDING", "SC-AAAA3");
+
+        assertViolates("ck_order_lines_line_total", () -> insertLine(order, 1, "2.50", 2, "4.00"));
+    }
+
+    @Test
+    void anOrderLineNumberIsUniqueWithinItsOrder() {
+        UUID order = insertOrder("PENDING", "SC-AAAA4");
+        insertLine(order, 1, "2.50", 2, "5.00");
+
+        assertViolates("uk_order_lines_order_line_no", () -> insertLine(order, 1, "1.00", 1, "1.00"));
+    }
+
+    @Test
+    void anOrderLineMustBelongToAnExistingOrder() {
+        assertViolates("fk_order_lines_order", () -> insertLine(UUID.randomUUID(), 1, "1.00", 1, "1.00"));
+    }
+
+    @Test
+    void deletingAnOrderRemovesItsLines() {
+        UUID order = insertOrder("PENDING", "SC-AAAA5");
+        insertLine(order, 1, "1.00", 1, "1.00");
+
+        jdbc.update("DELETE FROM ordering.orders WHERE id = ?", order);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM ordering.order_lines WHERE order_id = ?", Integer.class, order)).isZero();
+    }
+
+    @Test
+    void orderHasAtMostOneInvoice() {
+        UUID order = insertOrder("CONFIRMED", "SC-AAAA6");
+        insertInvoice(order);
+
+        assertViolates("uk_invoices_order", () -> insertInvoice(order));
     }
 
     // ---- helpers ----
@@ -157,23 +195,33 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
                 """, ownerId, day, start, end);
     }
 
-    private UUID insertBooking(String status) {
+    private UUID insertOrder(String status, String reference) {
         UUID id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO ordering.bookings
-                    (id, created_at, updated_at, version, item_id, quantity, scheduled_for, status,
+                INSERT INTO ordering.orders
+                    (id, created_at, updated_at, version, reference, pickup_at, status,
                      guest_name, guest_email, guest_phone)
-                VALUES (?, now(), now(), 0, gen_random_uuid(), 1, now() + interval '2 days', ?,
+                VALUES (?, now(), now(), 0, ?, now() + interval '2 days', ?,
                         'Guest', 'guest@example.com', '555-0100')
-                """, id, status);
+                """, id, reference, status);
         return id;
     }
 
-    private void insertInvoice(UUID bookingId) {
+    private void insertLine(UUID orderId, int lineNo, String unitPrice, int quantity, String lineTotal) {
+        jdbc.update("""
+                INSERT INTO ordering.order_lines
+                    (id, created_at, updated_at, version, order_id, line_no, item_id, item_name,
+                     unit_price, quantity, line_total)
+                VALUES (gen_random_uuid(), now(), now(), 0, ?, ?, gen_random_uuid(), 'Item',
+                        CAST(? AS NUMERIC), ?, CAST(? AS NUMERIC))
+                """, orderId, lineNo, unitPrice, quantity, lineTotal);
+    }
+
+    private void insertInvoice(UUID orderId) {
         jdbc.update("""
                 INSERT INTO ordering.invoices
-                    (id, created_at, updated_at, version, booking_id, subtotal, status)
+                    (id, created_at, updated_at, version, order_id, subtotal, status)
                 VALUES (gen_random_uuid(), now(), now(), 0, ?, 10.00, 'PENDING')
-                """, bookingId);
+                """, orderId);
     }
 }

@@ -1,9 +1,9 @@
 /**
- * Ordering module: bookings (orders), availability (working hours, blocked dates,
- * slot capacity) and invoices. Future {@code order-service}.
+ * Ordering module: orders and their lines, availability (working hours, blocked
+ * dates, slot capacity) and invoices. Future {@code order-service}.
  *
  * <p>Availability lives here rather than in its own module because slot capacity is
- * computed from bookings and must be checked in the same transaction that creates
+ * computed from orders and must be checked in the same transaction that creates
  * one (see CLAUDE.md §3).
  *
  * <p>Talks to other modules only through {@code catalog.CatalogApi} and

@@ -2,11 +2,11 @@ package com.sugarcrumbs.ordering.application;
 
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.identity.OwnerSettings;
-import com.sugarcrumbs.ordering.domain.BookingStatus;
+import com.sugarcrumbs.ordering.domain.OrderStatus;
 import com.sugarcrumbs.ordering.domain.BlockedDate;
 import com.sugarcrumbs.ordering.domain.WorkingHours;
 import com.sugarcrumbs.ordering.persistence.BlockedDateRepository;
-import com.sugarcrumbs.ordering.persistence.BookingRepository;
+import com.sugarcrumbs.ordering.persistence.OrderRepository;
 import com.sugarcrumbs.ordering.persistence.WorkingHoursRepository;
 import com.sugarcrumbs.ordering.web.dto.DayAvailabilityResponse;
 import com.sugarcrumbs.ordering.web.dto.TimeSlotResponse;
@@ -31,7 +31,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Slot math: working hours + blocked dates + current bookings give per-slot remaining capacity. */
+/** Slot math: working hours + blocked dates + current orders give per-slot remaining capacity. */
 class AvailabilityServiceTests {
 
     /** A Tuesday. */
@@ -39,10 +39,10 @@ class AvailabilityServiceTests {
 
     private final WorkingHoursRepository workingHoursRepository = mock(WorkingHoursRepository.class);
     private final BlockedDateRepository blockedDateRepository = mock(BlockedDateRepository.class);
-    private final BookingRepository bookingRepository = mock(BookingRepository.class);
+    private final OrderRepository orderRepository = mock(OrderRepository.class);
     private final OwnerApi ownerApi = mock(OwnerApi.class);
     private final AvailabilityService service =
-            new AvailabilityService(workingHoursRepository, blockedDateRepository, bookingRepository, ownerApi);
+            new AvailabilityService(workingHoursRepository, blockedDateRepository, orderRepository, ownerApi);
 
     private final UUID ownerId = UUID.randomUUID();
 
@@ -58,14 +58,14 @@ class AvailabilityServiceTests {
      * whatever zone the server runs in.
      */
     @Test
-    void slotsAreMatchedToBookingsInTheOwnersTimeZone() {
+    void slotsAreMatchedToOrdersInTheOwnersTimeZone() {
         when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("Asia/Tokyo")));
         open("09:00", "09:30", 30, 1);
 
         service.computeForDate(DAY);
 
-        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
-                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"), BookingStatus.CANCELLED);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"), OrderStatus.CANCELLED);
     }
 
     /** Daylight saving: the same 09:00 slot is 09:00Z in London's winter and 08:00Z in its summer. */
@@ -78,10 +78,10 @@ class AvailabilityServiceTests {
         service.computeForRange(DAY, DAY);
         service.computeForRange(summerTuesday, summerTuesday);
 
-        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
-                Instant.parse("2026-12-01T09:00:00Z"), Instant.parse("2026-12-01T09:30:00Z"), BookingStatus.CANCELLED);
-        verify(bookingRepository).countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
-                Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), BookingStatus.CANCELLED);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
+                Instant.parse("2026-12-01T09:00:00Z"), Instant.parse("2026-12-01T09:30:00Z"), OrderStatus.CANCELLED);
+        verify(orderRepository).countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
+                Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), OrderStatus.CANCELLED);
     }
 
     @Test
@@ -141,9 +141,9 @@ class AvailabilityServiceTests {
     }
 
     @Test
-    void bookingsReduceRemainingCapacityAndAFullSlotIsNotBookable() {
+    void ordersReduceRemainingCapacityAndAFullSlotIsNotBookable() {
         open("09:00", "10:00", 30, 2);
-        when(bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(any(), any(), any()))
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
                 .thenReturn(1L, 2L);
 
         List<TimeSlotResponse> slots = service.computeForDate(DAY).slots();
@@ -157,22 +157,22 @@ class AvailabilityServiceTests {
     @Test
     void anOverbookedSlotReportsZeroRemainingNotANegativeNumber() {
         open("09:00", "09:30", 30, 1);
-        when(bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(any(), any(), any()))
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
                 .thenReturn(3L);
 
         assertThat(service.computeForDate(DAY).slots().getFirst().remainingCapacity()).isZero();
     }
 
     @Test
-    void rescheduleChecksLeaveTheBookingItselfOutOfTheCount() {
+    void rescheduleChecksLeaveTheOrderItselfOutOfTheCount() {
         open("09:00", "09:30", 30, 1);
-        UUID bookingId = UUID.randomUUID();
-        when(bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNotAndIdNot(
-                any(), any(), any(), eq(bookingId))).thenReturn(0L);
-        when(bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(any(), any(), any()))
+        UUID orderId = UUID.randomUUID();
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotAndIdNot(
+                any(), any(), any(), eq(orderId))).thenReturn(0L);
+        when(orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(any(), any(), any()))
                 .thenReturn(1L);
 
-        assertThat(service.computeForDate(DAY, bookingId).slots().getFirst().bookable()).isTrue();
+        assertThat(service.computeForDate(DAY, orderId).slots().getFirst().bookable()).isTrue();
         assertThat(service.computeForDate(DAY).slots().getFirst().bookable()).isFalse();
     }
 

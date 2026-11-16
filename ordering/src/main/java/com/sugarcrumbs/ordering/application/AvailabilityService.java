@@ -2,10 +2,10 @@ package com.sugarcrumbs.ordering.application;
 
 import com.sugarcrumbs.identity.OwnerApi;
 import com.sugarcrumbs.ordering.domain.BlockedDate;
-import com.sugarcrumbs.ordering.domain.BookingStatus;
+import com.sugarcrumbs.ordering.domain.OrderStatus;
 import com.sugarcrumbs.ordering.domain.WorkingHours;
 import com.sugarcrumbs.ordering.persistence.BlockedDateRepository;
-import com.sugarcrumbs.ordering.persistence.BookingRepository;
+import com.sugarcrumbs.ordering.persistence.OrderRepository;
 import com.sugarcrumbs.ordering.persistence.WorkingHoursRepository;
 import com.sugarcrumbs.ordering.web.dto.DayAvailabilityResponse;
 import com.sugarcrumbs.ordering.web.dto.TimeSlotResponse;
@@ -21,22 +21,18 @@ import java.util.*;
 import java.util.UUID;
 
 /**
- * The single place that answers "can a customer book this day/slot?" —
- * every other part of the app (browse-and-book flow, owner's calendar
- * view) should call this rather than combining {@link WorkingHours},
- * {@link BlockedDate} and {@link com.sugarcrumbs.ordering.domain.Booking} occupancy themselves.
+ * The single place that answers "can a guest order for this day/slot?" —
+ * every other part of the app (checkout, the owner's calendar) should call
+ * this rather than combining {@link WorkingHours}, {@link BlockedDate} and
+ * order occupancy themselves.
  *
- * <p>As of Sprint 4, {@link #bookedCount} is wired to the real
- * {@link BookingRepository} — every non-cancelled booking in a slot
- * counts against that slot's capacity. The one wrinkle: when
- * {@code BookingService.reschedule} checks whether a booking's *new*
- * time is free, that booking's own (about-to-change) row would
- * otherwise count against itself. {@link #computeForDate(LocalDate, UUID)}
- * exists for exactly that case — pass the booking's own id to exclude it
- * from its own capacity count.
+ * <p>Every non-cancelled order in a slot takes one place of its capacity,
+ * however many lines it has. When {@code OrderService.reschedule} checks an
+ * order's <em>new</em> time, that order's own row would otherwise count against
+ * itself; {@link #computeForDate(LocalDate, UUID)} takes its id to leave it out.
  *
  * <p>Working hours are local times in the Owner's time zone ({@link OwnerApi#settings()}),
- * while bookings are stored as instants; each slot is converted with that zone, so the
+ * while orders are stored as instants; each slot is converted with that zone, so the
  * server's own zone never matters.
  */
 @Service
@@ -48,16 +44,16 @@ public class AvailabilityService {
 
     private final WorkingHoursRepository workingHoursRepository;
     private final BlockedDateRepository blockedDateRepository;
-    private final BookingRepository bookingRepository;
+    private final OrderRepository orderRepository;
     private final OwnerApi ownerApi;
 
     public AvailabilityService(WorkingHoursRepository workingHoursRepository,
                                BlockedDateRepository blockedDateRepository,
-                               BookingRepository bookingRepository,
+                               OrderRepository orderRepository,
                                OwnerApi ownerApi) {
         this.workingHoursRepository = workingHoursRepository;
         this.blockedDateRepository = blockedDateRepository;
-        this.bookingRepository = bookingRepository;
+        this.orderRepository = orderRepository;
         this.ownerApi = ownerApi;
     }
 
@@ -65,11 +61,11 @@ public class AvailabilityService {
         return computeForDate(date, null);
     }
 
-    /** @param excludeBookingId a booking to leave out of its own slot's occupancy count — see class javadoc */
-    public DayAvailabilityResponse computeForDate(LocalDate date, UUID excludeBookingId) {
+    /** @param excludeOrderId an order to leave out of its own slot's occupancy count — see class javadoc */
+    public DayAvailabilityResponse computeForDate(LocalDate date, UUID excludeOrderId) {
         UUID ownerId = ownerApi.currentOwnerId();
         return computeForDate(ownerId, date, blockedDateRepository.findAllByOwnerIdOrderByStartDateAsc(ownerId),
-                excludeBookingId, ownerApi.settings().timeZone());
+                excludeOrderId, ownerApi.settings().timeZone());
     }
 
     public Map<LocalDate, DayAvailabilityResponse> computeForRange(LocalDate from, LocalDate to) {
@@ -92,7 +88,7 @@ public class AvailabilityService {
     }
 
     private DayAvailabilityResponse computeForDate(UUID ownerId, LocalDate date, List<BlockedDate> blockedDates,
-                                                   UUID excludeBookingId, ZoneId zone) {
+                                                   UUID excludeOrderId, ZoneId zone) {
         BlockedDate blocking = blockedDates.stream()
                 .filter(bd -> bd.covers(date))
                 .findFirst()
@@ -107,11 +103,11 @@ public class AvailabilityService {
             return DayAvailabilityResponse.closed(date, "Closed on " + date.getDayOfWeek());
         }
 
-        return DayAvailabilityResponse.open(date, generateSlots(hours, date, excludeBookingId, zone));
+        return DayAvailabilityResponse.open(date, generateSlots(hours, date, excludeOrderId, zone));
     }
 
     /** Slots that don't evenly divide the working window are simply not offered — no partial trailing slot. */
-    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date, UUID excludeBookingId,
+    private List<TimeSlotResponse> generateSlots(WorkingHours hours, LocalDate date, UUID excludeOrderId,
                                                  ZoneId zone) {
         List<TimeSlotResponse> slots = new ArrayList<>();
         LocalTime cursor = hours.getStartTime();
@@ -124,7 +120,7 @@ public class AvailabilityService {
                 break;
             }
             int capacity = hours.getMaxConcurrentBookings();
-            int booked = bookedCount(date, cursor, slotEnd, excludeBookingId, zone);
+            int booked = bookedCount(date, cursor, slotEnd, excludeOrderId, zone);
             int remaining = Math.max(0, capacity - booked);
             slots.add(new TimeSlotResponse(cursor, slotEnd, capacity, remaining, remaining > 0));
             cursor = slotEnd;
@@ -132,16 +128,16 @@ public class AvailabilityService {
         return slots;
     }
 
-    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeBookingId,
+    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeOrderId,
                             ZoneId zone) {
         Instant slotStartInstant = date.atTime(slotStart).atZone(zone).toInstant();
         Instant slotEndInstant = date.atTime(slotEnd).atZone(zone).toInstant();
 
-        if (excludeBookingId == null) {
-            return (int) bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNot(
-                    slotStartInstant, slotEndInstant, BookingStatus.CANCELLED);
+        if (excludeOrderId == null) {
+            return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNot(
+                    slotStartInstant, slotEndInstant, OrderStatus.CANCELLED);
         }
-        return (int) bookingRepository.countByScheduledForGreaterThanEqualAndScheduledForLessThanAndStatusNotAndIdNot(
-                slotStartInstant, slotEndInstant, BookingStatus.CANCELLED, excludeBookingId);
+        return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotAndIdNot(
+                slotStartInstant, slotEndInstant, OrderStatus.CANCELLED, excludeOrderId);
     }
 }

@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotNull;
 
 import java.time.Instant;
 
-public record BookingRescheduleRequest(
-        @NotNull @Future Instant scheduledFor
+public record RescheduleRequest(
+        @NotNull @Future Instant pickupAt
 ) {
 }
