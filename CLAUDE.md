@@ -70,9 +70,6 @@ and springdoc. The `app` module is packaged as an executable jar, `app/target/ba
 Known problems (see the PLAN.md §2 table; the issue that fixes each one is in brackets):
 - Paged responses are serialized as Spring Data's `PageImpl` (it logs a warning); switching to `VIA_DTO`
   (`content` + `page{}`) changes every list endpoint's JSON, so do it before the SPA depends on the shape.
-- **Overbooking race:** capacity is checked, then the order is inserted, with no lock in between. [#15]
-- Orders for times in the past are accepted when an item has `leadTimeHours = 0`. The lead-time check also
-  uses `toHours()`, which rounds down. [#15]
 
 ---
 
