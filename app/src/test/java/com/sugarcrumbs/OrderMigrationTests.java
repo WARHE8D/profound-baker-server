@@ -110,6 +110,48 @@ class OrderMigrationTests {
         assertThat(jdbc.queryForObject("SELECT to_regclass('catalog.items')", String.class)).isNull();
     }
 
+    /** Ordering V6 (#21): offline payments only. An e-transfer was a bank transfer under another name. */
+    @Test
+    void anETransferPaymentBecomesABankTransfer() {
+        migrate("ordering", "5");
+        UUID order = insertOrder("SC-AAAA1");
+        jdbc.update("""
+                INSERT INTO ordering.invoices (id, created_at, updated_at, version, order_id, number, subtotal, status,
+                                               payment_method, payment_reference, paid_at)
+                VALUES (gen_random_uuid(), now(), now(), 0, ?, 'INV-2026-0001', 10.00, 'PAID', 'E_TRANSFER', 'T-1', now())
+                """, order);
+
+        migrate("ordering", null);
+
+        assertThat(jdbc.queryForObject("SELECT payment_method FROM ordering.invoices", String.class))
+                .isEqualTo("BANK_TRANSFER");
+    }
+
+    /** Card or "other" payments were never possible through the API: a human decides, the migration doesn't guess. */
+    @Test
+    void aCardPaymentStopsTheMigration() {
+        migrate("ordering", "5");
+        UUID order = insertOrder("SC-AAAA2");
+        jdbc.update("""
+                INSERT INTO ordering.invoices (id, created_at, updated_at, version, order_id, number, subtotal, status,
+                                               payment_method, paid_at)
+                VALUES (gen_random_uuid(), now(), now(), 0, ?, 'INV-2026-0002', 10.00, 'PAID', 'ONLINE_CARD', now())
+                """, order);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> migrate("ordering", null))
+                .hasStackTraceContaining("need a decision");
+    }
+
+    private UUID insertOrder(String reference) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO ordering.orders (id, created_at, updated_at, version, reference, pickup_at, status,
+                                             guest_name, guest_email, guest_phone)
+                VALUES (?, now(), now(), 0, ?, now(), 'CONFIRMED', 'Guest', 'guest@example.com', '555-0100')
+                """, id, reference);
+        return id;
+    }
+
     private UUID booking(UUID itemId, int quantity, String status, String createdAt) {
         UUID id = UUID.randomUUID();
         jdbc.update("""

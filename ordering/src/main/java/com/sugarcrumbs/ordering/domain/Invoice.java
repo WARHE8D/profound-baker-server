@@ -68,13 +68,16 @@ public class Invoice extends BaseEntity {
     @Column(name = "payment_method", length = 20)
     private PaymentMethod paymentMethod;
 
-    /** External reference, e.g. a Stripe PaymentIntent/charge id. Null until paid. */
+    /** The bank transfer's reference (required for one), or an optional note for cash. Null until paid. */
     @Size(max = 200)
     @Column(name = "payment_reference", length = 200)
     private String paymentReference;
 
     @Column(name = "paid_at")
     private Instant paidAt;
+
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
 
     protected Invoice() {
         // required by JPA
@@ -117,20 +120,37 @@ public class Invoice extends BaseEntity {
         this.discountAmount = normalize(discount);
     }
 
+    /**
+     * Records an offline payment. A bank transfer needs its reference, so it can be matched to the
+     * statement; for cash a reference is an optional note. {@code paidAt} may lie in the past (the
+     * Owner records a payment taken earlier), never in the future.
+     */
     public void markPaid(PaymentMethod method, String paymentReference, Instant paidAt) {
         if (status != InvoiceStatus.PENDING) {
             throw new IllegalStateException("cannot mark paid an invoice in status " + status);
         }
-        this.paymentMethod = Objects.requireNonNull(method, "paymentMethod is required");
-        this.paymentReference = paymentReference;
-        this.paidAt = Objects.requireNonNull(paidAt, "paidAt is required");
+        if (method == null) {
+            throw new IllegalArgumentException("paymentMethod is required");
+        }
+        String reference = paymentReference == null || paymentReference.isBlank() ? null : paymentReference.strip();
+        if (method == PaymentMethod.BANK_TRANSFER && reference == null) {
+            throw new IllegalArgumentException("a bank transfer needs its reference");
+        }
+        if (paidAt == null || paidAt.isAfter(Instant.now())) {
+            throw new IllegalArgumentException("paidAt is required and cannot be in the future");
+        }
+        this.paymentMethod = method;
+        this.paymentReference = reference;
+        this.paidAt = paidAt;
         this.status = InvoiceStatus.PAID;
     }
 
-    public void refund() {
+    /** The Owner gave the money back. The payment details stay, as the record of what was refunded. */
+    public void refund(Instant refundedAt) {
         if (status != InvoiceStatus.PAID) {
             throw new IllegalStateException("only a paid invoice can be refunded (current status: " + status + ")");
         }
+        this.refundedAt = Objects.requireNonNull(refundedAt, "refundedAt");
         this.status = InvoiceStatus.REFUNDED;
     }
 
@@ -177,6 +197,10 @@ public class Invoice extends BaseEntity {
 
     public Instant getPaidAt() {
         return paidAt;
+    }
+
+    public Instant getRefundedAt() {
+        return refundedAt;
     }
 
     @Override

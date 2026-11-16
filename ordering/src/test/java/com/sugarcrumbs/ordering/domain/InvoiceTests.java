@@ -61,7 +61,7 @@ class InvoiceTests {
     @Test
     void paidThenRefunded() {
         Invoice invoice = valid().build();
-        Instant paidAt = Instant.parse("2026-12-01T10:05:00Z");
+        Instant paidAt = Instant.parse("2026-01-10T10:05:00Z");
 
         invoice.markPaid(PaymentMethod.CASH, null, paidAt);
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PAID);
@@ -69,8 +69,38 @@ class InvoiceTests {
         assertThatIllegalStateException().isThrownBy(() -> invoice.applyDiscount(BigDecimal.ONE));
         assertThatIllegalStateException().isThrownBy(invoice::voidInvoice);
 
-        invoice.refund();
+        Instant refundedAt = Instant.parse("2026-01-11T09:00:00Z");
+        invoice.refund(refundedAt);
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.REFUNDED);
+        assertThat(invoice.getRefundedAt()).isEqualTo(refundedAt);
+        assertThat(invoice.getPaymentMethod()).as("kept as the record of what was refunded")
+                .isEqualTo(PaymentMethod.CASH);
+    }
+
+    @Test
+    void aBankTransferNeedsItsReferenceAndCashMayHaveANote() {
+        Invoice transfer = valid().build();
+        Instant now = Instant.now();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> transfer.markPaid(PaymentMethod.BANK_TRANSFER, " ", now));
+        assertThat(transfer.getStatus()).isEqualTo(InvoiceStatus.PENDING);
+        transfer.markPaid(PaymentMethod.BANK_TRANSFER, "  TRX-881 ", now);
+        assertThat(transfer.getPaymentReference()).isEqualTo("TRX-881");
+
+        Invoice cash = valid().build();
+        cash.markPaid(PaymentMethod.CASH, "", now);
+        assertThat(cash.getPaymentReference()).isNull();
+    }
+
+    @Test
+    void aPaymentNeedsAMethodAndCannotBeDatedInTheFuture() {
+        Invoice invoice = valid().build();
+
+        assertThatIllegalArgumentException().isThrownBy(() -> invoice.markPaid(null, null, Instant.now()));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> invoice.markPaid(PaymentMethod.CASH, null, Instant.now().plusSeconds(3600)));
+        assertThatIllegalArgumentException().isThrownBy(() -> invoice.markPaid(PaymentMethod.CASH, null, null));
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PENDING);
     }
 
     @Test
@@ -81,6 +111,6 @@ class InvoiceTests {
 
         assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.VOID);
         assertThatIllegalStateException().isThrownBy(() -> invoice.markPaid(PaymentMethod.CASH, null, Instant.now()));
-        assertThatIllegalStateException().isThrownBy(invoice::refund);
+        assertThatIllegalStateException().isThrownBy(() -> invoice.refund(Instant.now()));
     }
 }

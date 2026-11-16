@@ -171,6 +171,25 @@ class SchemaConstraintTests extends AbstractIntegrationTest {
     }
 
     @Test
+    void aPaidInvoiceMustSayHowItWasPaid() {
+        UUID order = insertOrder("CONFIRMED", "SC-AAAAC");
+        insertInvoice(order, "INV-1999-0002");
+
+        assertViolates("ck_invoices_paid_has_method", () -> jdbc.update(
+                "UPDATE ordering.invoices SET status = 'PAID' WHERE order_id = ?", order));
+    }
+
+    @Test
+    void paymentMethodsAreOfflineOnly() {
+        UUID order = insertOrder("CONFIRMED", "SC-AAAAD");
+        insertInvoice(order, "INV-1999-0003");
+
+        assertViolates("ck_invoices_payment_method", () -> jdbc.update(
+                "UPDATE ordering.invoices SET status = 'PAID', payment_method = 'ONLINE_CARD', paid_at = now()"
+                        + " WHERE order_id = ?", order));
+    }
+
+    @Test
     void invoiceNumbersAreUnique() {
         insertInvoice(insertOrder("CONFIRMED", "SC-AAAAA"), "INV-1999-0001");
 
