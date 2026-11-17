@@ -2499,6 +2499,42 @@
       "name": "Dashboard (owner)",
       "item": [
         {
+          "name": "Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/summary?months=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "months",
+                  "value": "12"
+                }
+              ]
+            },
+            "description": "Today's pickups (total and still to collect), orders pending a decision, and revenue from paid invoices per month (1-24 months, default 12), all in the bakery's time zone."
+          }
+        },
+        {
           "name": "Production list",
           "event": [
             {

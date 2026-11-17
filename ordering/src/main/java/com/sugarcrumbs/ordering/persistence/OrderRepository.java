@@ -43,6 +43,9 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecific
     List<ProductionRow> production(@Param("from") Instant from, @Param("to") Instant to,
                                    @Param("statuses") Collection<OrderStatus> statuses);
 
+    /** For the dashboard's backlog: e.g. how many orders still wait for the Owner's decision. */
+    long countByStatus(OrderStatus status);
+
     /** How many orders in the given statuses are picked up in {@code [from, to)}. */
     long countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusIn(
             Instant from, Instant to, Collection<OrderStatus> statuses);

@@ -1,6 +1,7 @@
 package com.sugarcrumbs.ordering.web;
 
 import com.sugarcrumbs.ordering.application.DashboardService;
+import com.sugarcrumbs.ordering.web.dto.DashboardSummaryResponse;
 import com.sugarcrumbs.ordering.web.dto.ProductionListResponse;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +20,15 @@ public class DashboardController {
 
     public DashboardController(DashboardService dashboardService) {
         this.dashboardService = dashboardService;
+    }
+
+    /**
+     * Today's pickups, how many orders wait for a decision, and revenue from paid invoices for the
+     * last {@code months} months (default 12, at most 24), oldest first.
+     */
+    @GetMapping("/summary")
+    public DashboardSummaryResponse summary(@RequestParam(defaultValue = "12") int months) {
+        return dashboardService.summary(months);
     }
 
     /**
