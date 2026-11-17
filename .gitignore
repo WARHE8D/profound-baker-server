@@ -38,3 +38,6 @@ notes.md
 
 # Local secrets (copy .env.example)
 .env
+
+# Production backups (docker-compose.prod.yml, BACKUP_HOST_DIR)
+/backups/
