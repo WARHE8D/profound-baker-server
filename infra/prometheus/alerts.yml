@@ -1,0 +1,78 @@
+# Alert rules (#26, CLAUDE.md §6). They show as firing in Prometheus and in Grafana (Alerting > Alert rules,
+# "Data source-managed"). There is no Alertmanager yet: wiring one up (email, Telegram...) is how they would
+# reach the Owner's phone.
+# Validate: docker run --rm -v ./infra/prometheus:/etc/prometheus --entrypoint promtool prom/prometheus:v3.9.1 check rules /etc/prometheus/alerts.yml
+
+groups:
+  - name: availability
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus has not been able to scrape {{ $labels.instance }} for 2 minutes."
+
+      - alert: High5xxRate
+        # More than 5% of requests failing, and at least a few of them, so one error at 3 a.m. is not an alert.
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="baker", status=~"5.."}[5m]))
+            / sum(rate(http_server_requests_seconds_count{job="baker"}[5m])) > 0.05
+          and sum(increase(http_server_requests_seconds_count{job="baker", status=~"5.."}[5m])) >= 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "More than 5% of API requests are failing"
+          description: "{{ $value | humanizePercentage }} of requests returned 5xx over the last 5 minutes. The app logs each one at WARN with its requestId and traceId."
+
+  - name: business
+    rules:
+      - alert: PendingBacklogGrowing
+        # Orders keep arriving and nobody is confirming them. They are auto-cancelled after the hold window
+        # (app.order.pending-hold-hours), losing the sale, so the Owner should look before then.
+        expr: baker_orders_pending >= 10 and delta(baker_orders_pending[3h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} orders are waiting for the Owner, and the number is growing"
+          description: "Pending orders are auto-cancelled once the hold window passes."
+
+      - alert: StaleOrdersAutoCancelled
+        expr: increase(baker_stale_orders_cancelled_total[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Orders were auto-cancelled because nobody answered them"
+
+      - alert: LoginFailuresBurst
+        # Above what a mistyped password produces; the rate limit (5/min per IP) slows guessing, this shows it.
+        expr: increase(baker_auth_login_failures_total[15m]) > 20
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} failed Owner logins in 15 minutes"
+
+  - name: backups
+    rules:
+      - alert: BackupStale
+        # Nightly job; 26 hours leaves room for a slow run without waiting a whole extra day.
+        expr: time() - baker_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful backup for {{ $value | humanizeDuration }}"
+          description: "Check the backup container's logs: docker compose -f docker-compose.prod.yml logs backup"
+
+      - alert: BackupNeverSucceeded
+        # A fresh deployment backs up on start; a gauge of 0 an hour later means that first run failed.
+        expr: baker_backup_last_success_timestamp_seconds == 0
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "The backup job has never completed a backup"

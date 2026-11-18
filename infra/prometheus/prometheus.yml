@@ -1,0 +1,35 @@
+# Prometheus for the production stack (#26). Scrapes over the internal Docker network only: the app's
+# Actuator port (9080) and the backup job's metrics are never published or proxied.
+# Validate: docker run --rm -v ./infra/prometheus:/etc/prometheus --entrypoint promtool prom/prometheus:v3.9.1 check config /etc/prometheus/prometheus.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # The app: HTTP, JVM, HikariCP and the baker_* business metrics.
+  - job_name: baker
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["app:9080"]
+
+  # The nightly backup job: one gauge, the time of the last good backup (infra/backup/backup.sh).
+  # Served by busybox httpd as a plain file, hence the explicit text format.
+  - job_name: backup
+    scrape_interval: 60s
+    metrics_path: /metrics
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets: ["backup:9101"]
+
+  # Tempo's own health, and the service-graph/span metrics it writes here via remote write.
+  - job_name: tempo
+    static_configs:
+      - targets: ["tempo:3200"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

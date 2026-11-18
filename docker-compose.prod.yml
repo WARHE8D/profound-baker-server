@@ -1,7 +1,9 @@
-# Production stack for the single VPS: Caddy (TLS, reverse proxy) -> app -> Postgres, plus nightly backups.
+# Production stack for the single VPS: Caddy (TLS, reverse proxy) -> app -> Postgres, plus nightly backups
+# and observability (Prometheus, Tempo, Grafana; #26).
 #   docker compose -f docker-compose.prod.yml up -d --build
-# Values come from .env next to this file (copy .env.example). Only Caddy publishes ports;
-# the app and Postgres are reachable only on the internal network.
+# Values come from .env next to this file (copy .env.example). Only Caddy publishes ports to the internet;
+# Grafana is published on the server's loopback only (an SSH tunnel away, see README.md "Observability"),
+# and everything else is reachable only on the internal network.
 
 # Own project name so this stack never shares containers or volumes with the dev docker-compose.yml.
 name: sugarcrumbs-prod
@@ -42,6 +44,8 @@ services:
       APP_OWNER_EMAIL: ${APP_OWNER_EMAIL:-}
       APP_OWNER_INITIAL_PASSWORD: ${APP_OWNER_INITIAL_PASSWORD:-}
       APP_OWNER_TIME_ZONE: ${APP_OWNER_TIME_ZONE:-UTC}
+      # Traces go to Tempo over OTLP/HTTP (#26). Unset (dev, tests), spans are made but not sent anywhere.
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
     volumes:
       - uploads:/data/uploads
     # Health check is defined in the Dockerfile (Actuator readiness on the internal port 9080).
@@ -94,8 +98,68 @@ services:
       - uploads:/data/uploads:ro
     # Health check in infra/backup/Dockerfile: unhealthy once the last good backup is over 26 hours old.
 
+  # --- Observability (#26, CLAUDE.md §6). Config and dashboards are files in infra/, never set up by hand.
+
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}
+      # Tempo writes its service-graph metrics here; exemplars link latency points to their traces.
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+
+  # Tempo runs as uid 10001 and a fresh named volume belongs to root: hand it over once, then exit.
+  tempo-init:
+    image: grafana/tempo:2.9.0
+    user: root
+    entrypoint: ["chown", "10001:10001", "/var/tempo"]
+    volumes:
+      - tempo_data:/var/tempo
+
+  tempo:
+    image: grafana/tempo:2.9.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    depends_on:
+      tempo-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./infra/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - tempo
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/service-overview.json
+    # Loopback only: reach it with `ssh -L 3000:127.0.0.1:3000 <server>`, then http://localhost:3000.
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+
 volumes:
   postgres_data:
   uploads:
   caddy_data:
   caddy_config:
+  prometheus_data:
+  tempo_data:
+  grafana_data:

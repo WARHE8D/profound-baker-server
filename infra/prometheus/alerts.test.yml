@@ -1,0 +1,140 @@
+# Unit tests for alerts.yml, run by promtool (AlertRulesTests in CI, or by hand):
+#   docker run --rm -v ./infra/prometheus:/etc/prometheus -w /etc/prometheus --entrypoint promtool prom/prometheus:v3.9.1 test rules alerts.test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a target that stops answering is down after 2 minutes, not before
+    interval: 1m
+    input_series:
+      - series: 'up{job="baker", instance="app:9080"}'
+        values: "1 1 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ServiceDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: baker, instance: "app:9080"}
+            exp_annotations:
+              summary: "baker is down"
+              description: "Prometheus has not been able to scrape app:9080 for 2 minutes."
+
+  - name: a sustained 5xx rate alerts, a single error does not
+    interval: 1m
+    input_series:
+      # 60 requests a minute; from minute 10, 10 of them fail (about 17%).
+      - series: 'http_server_requests_seconds_count{job="baker", status="200"}'
+        values: "0+60x9 600+50x20"
+      - series: 'http_server_requests_seconds_count{job="baker", status="500"}'
+        values: "0x9 10+10x20"
+      - series: 'http_server_requests_seconds_count{job="quiet", status="200"}'
+        values: "0+60x30"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: High5xxRate
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: High5xxRate
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "More than 5% of API requests are failing"
+              description: "16.67% of requests returned 5xx over the last 5 minutes. The app logs each one at WARN with its requestId and traceId."
+
+  - name: one 5xx among few requests is not an alert
+    interval: 1m
+    input_series:
+      - series: 'http_server_requests_seconds_count{job="baker", status="200"}'
+        values: "0+2x30"
+      - series: 'http_server_requests_seconds_count{job="baker", status="500"}'
+        values: "0x10 1x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: High5xxRate
+        exp_alerts: []
+
+  - name: a large and growing pending backlog alerts; a large stable one does not
+    # Samples every 5m: Prometheus treats a series as gone 5m after its last sample.
+    interval: 5m
+    input_series:
+      - series: "baker_orders_pending"
+        values: "2+1x60"
+      - series: 'baker_orders_pending{instance="stable"}'
+        values: "12x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PendingBacklogGrowing
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: PendingBacklogGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "50 orders are waiting for the Owner, and the number is growing"
+              description: "Pending orders are auto-cancelled once the hold window passes."
+
+  - name: backups alert once the last success is over 26 hours old
+    interval: 5m
+    input_series:
+      # Last success at 1h (test time starts at the epoch), so its age is the evaluation time minus 1h.
+      - series: 'baker_backup_last_success_timestamp_seconds{job="backup"}'
+        values: "3600x400"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: BackupStale
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, job: backup}
+            exp_annotations:
+              summary: "No successful backup for 1d 3h 0m 0s"
+              description: "Check the backup container's logs: docker compose -f docker-compose.prod.yml logs backup"
+      - eval_time: 28h
+        alertname: BackupNeverSucceeded
+        exp_alerts: []
+
+  - name: a backup job that has never succeeded alerts after an hour
+    interval: 5m
+    input_series:
+      - series: 'baker_backup_last_success_timestamp_seconds{job="backup"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BackupNeverSucceeded
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: BackupNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: critical, job: backup}
+            exp_annotations:
+              summary: "The backup job has never completed a backup"
+
+  - name: auto-cancelled orders and a burst of failed logins are reported
+    interval: 1m
+    input_series:
+      - series: "baker_stale_orders_cancelled_total"
+        values: "0x10 2x10"
+      - series: "baker_auth_login_failures_total"
+        values: "0x5 0+3x15"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: StaleOrdersAutoCancelled
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: StaleOrdersAutoCancelled
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Orders were auto-cancelled because nobody answered them"
+      - eval_time: 20m
+        alertname: LoginFailuresBurst
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              # Flat until 6m, then +3 a minute: 42 failures between 5m and 20m.
+              summary: "42 failed Owner logins in 15 minutes"

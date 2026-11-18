@@ -111,6 +111,30 @@ class BackupScriptTests {
         assertThat(sh("cat /backups/last-success").getStdout().strip()).isEqualTo("1");
     }
 
+    /** #26: Prometheus reads the time of the last good backup from :9101/metrics (alert BackupStale). */
+    @Test
+    void theTimeOfTheLastGoodBackupIsServedToPrometheus() throws Exception {
+        sh("rm -rf /backups /run/metrics && mkdir -p /backups");
+        assertThat(sh("/usr/local/bin/backup.sh --metrics-only").getExitCode()).isZero();
+        assertThat(sh("cat /run/metrics/metrics").getStdout())
+                .as("no backup yet").contains("baker_backup_last_success_timestamp_seconds 0\n");
+
+        ExecResult run = sh("/usr/local/bin/backup.sh");
+        assertThat(run.getExitCode()).as(run.getStdout() + run.getStderr()).isZero();
+        String lastSuccess = sh("cat /backups/last-success").getStdout().strip();
+
+        // Served the way entrypoint.sh serves it.
+        assertThat(sh("httpd -p 9101 -h /run/metrics").getExitCode()).isZero();
+        assertThat(sh("wget -qO- http://localhost:9101/metrics").getStdout())
+                .contains("# TYPE baker_backup_last_success_timestamp_seconds gauge\n")
+                .contains("baker_backup_last_success_timestamp_seconds " + lastSuccess + "\n");
+
+        // A failed run keeps the last good time: the gauge ages, and the alert fires once it is too old.
+        assertThat(sh("PGPASSWORD=wrong /usr/local/bin/backup.sh").getExitCode()).isNotZero();
+        assertThat(sh("wget -qO- http://localhost:9101/metrics").getStdout())
+                .contains("baker_backup_last_success_timestamp_seconds " + lastSuccess + "\n");
+    }
+
     /** Backups hold guests' contact details: they never leave the server unencrypted. */
     @Test
     void theSchedulerRefusesABucketWithoutAnEncryptionPassword() throws Exception {

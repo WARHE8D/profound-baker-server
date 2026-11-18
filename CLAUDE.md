@@ -233,21 +233,31 @@ distributed locking, which is more complexity than a single baker needs.
 ## 6. Observability (#26, expanded)
 
 - The deployable (`app` today, each service after extraction) includes actuator,
-  `micrometer-registry-prometheus`, and `micrometer-tracing-bridge-otel` with the OTLP exporter. Tracing pays off
-  from day one: spans show module calls in-process now and service-to-service calls after the split.
-  Spring Modulith's `spring-modulith-observability` adds per-module spans.
+  `micrometer-registry-prometheus`, and `spring-boot-starter-opentelemetry` (Micrometer tracing over OTLP; its OTLP
+  *metrics* registry is switched off, Prometheus is the metrics path). Tracing pays off from day one: spans show
+  module calls in-process now and service-to-service calls after the split. `spring-modulith-starter-insight`
+  adds per-module spans. Every request is sampled; the OTLP endpoint is only set in `docker-compose.prod.yml`.
+- `RequestIdFilter` (in `app`) gives each request an `X-Request-Id` (a plausible incoming one is kept), puts it in
+  the MDC as `requestId` and on the span as `request.id`. `ObservabilityConfig` drops security observations
+  that have no parent, so management-port traffic (health checks, scrapes) makes no traces.
 - **Prometheus** scrapes `/actuator/prometheus` on each management port. **Tempo** receives OTLP traces, and
   Grafana's service graph shows gateway → service → service calls.
 - **Grafana** datasources and dashboards are **provisioned from files** in `infra/grafana/`. Don't configure
   them by hand in the UI. Dashboards:
   - *Service overview*: request rate, 4xx and 5xx by route, p50/p95/p99 latency, JVM, HikariCP, circuit breaker state.
   - *Business*: orders by status, pending backlog, auto-cancelled orders, login failures, invoice revenue.
-- Custom metrics go in application services, with names such as `baker_orders_total{status}`,
-  `baker_orders_pending`, `baker_stale_orders_cancelled_total`, `baker_auth_login_failures_total`.
+- Custom metrics go in the owning module, with names such as `baker_orders_total{status}`,
+  `baker_orders_pending`, `baker_stale_orders_cancelled_total`, `baker_auth_login_failures_total`,
+  `baker_invoices_paid_amount_total`. Order metrics count `OrderEvent`s after commit (`OrderMetrics`); register
+  counters up front so they read 0 rather than missing. `ActuatorEndpointsTests` fails if a dashboard or alert
+  queries an app metric the app doesn't export.
 - Prod logs are JSON and include `traceId`, `spanId` and `requestId`. Log WARN with a stack trace for every 5xx.
   Don't log PII (emails, phones) at INFO.
 - Prometheus alert rules in `infra/prometheus/alerts.yml`: 5xx rate, a service down, a growing pending backlog,
-  backup job failure.
+  backup job failure (the backup container serves `baker_backup_last_success_timestamp_seconds` on `:9101`).
+  Every rule has promtool unit tests in `alerts.test.yml` (run by `AlertRulesTests`). No Alertmanager yet.
+- Grafana is published on the server's loopback only (`127.0.0.1:3000`, reached over an SSH tunnel), never
+  through Caddy. Prometheus and Tempo publish no ports.
 
 ---
 
@@ -323,7 +333,8 @@ docker compose -f docker-compose.prod.yml down        # add -v to also drop its 
 ```
 
 Ports: app 8080, Actuator 9080 (management port; internal only, never proxied by Caddy), Postgres 5432.
-In prod only Caddy publishes ports (80/443). Planned: Prometheus 9090, Grafana 3000, Tempo 3200/4317. After the split:
+In prod only Caddy publishes ports (80/443), plus Grafana on the server's loopback (3000). Internal only: Prometheus 9090,
+Tempo 3200 (OTLP 4318/4317), backup metrics 9101. After the split:
 gateway 8080, auth 8081, catalog 8082, order 8083.
 
 > ⚠️ Stop any locally installed PostgreSQL service before starting the Docker one, or both will fight over
@@ -339,7 +350,7 @@ Follow the PLAN.md phases, with steps added for the modular structure. One PR pe
 |---|---|---|
 | A ✅ | `docs/` merged in; modular monolith (`common`, `identity`, `catalog`, `ordering`, `app`); cross-module JPA relations replaced by ids + `CatalogApi`/`OwnerApi`; `ModularityTests` | — |
 | P0 | Flyway baseline (one migration location per module), external config, jar + Docker + compose, error cleanup, serving uploads, Testcontainers + CI | #4–#9 |
-| B | Observability: actuator + Micrometer + tracing in `app`, `infra/` with Prometheus, Grafana, Tempo | #26 (moved earlier) |
+| B ✅ | Observability: actuator + Micrometer + tracing in `app`, `infra/` with Prometheus, Grafana, Tempo | #26 (moved earlier) |
 | P1 | Security in `identity` (JWT, bootstrap, profile + time zone); route split, CORS, rate limits | #10–#13 |
 | P2 | Order + OrderLine, checkout rules and slot lock, owner order management with `REJECTED`, domain events | #14–#17 |
 | P3 | Magic-link issuance and guest endpoints | #18, #19 |

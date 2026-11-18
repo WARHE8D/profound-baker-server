@@ -3,10 +3,15 @@ package com.sugarcrumbs;
 import com.sugarcrumbs.common.test.AbstractIntegrationTest;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -40,6 +45,7 @@ class ProfileStartupTests {
     }
 
     @Nested
+    @ExtendWith(OutputCaptureExtension.class)
     @SpringBootTest(properties = {
             "APP_STORAGE_PATH=target/test-uploads",
             "APP_CORS_ALLOWED_ORIGINS=https://shop.example"
@@ -67,6 +73,26 @@ class ProfileStartupTests {
             assertThat(showSql).isFalse();
             assertThat(storagePath).isEqualTo("target/test-uploads");
             assertThat(corsOrigins).isEqualTo("https://shop.example");
+        }
+
+        /** #26: one JSON object per line, with the ids RequestIdFilter and tracing put in the MDC. */
+        @Test
+        void logsOneJsonObjectPerLineCarryingTheRequestAndTraceIds(CapturedOutput output) {
+            MDC.put("requestId", "json-log-check-01");
+            MDC.put("traceId", "4bf92f3577b34da6a3ce929d0e0e4736");
+            try {
+                LoggerFactory.getLogger(ProfileStartupTests.class).info("structured logging check");
+            } finally {
+                MDC.remove("requestId");
+                MDC.remove("traceId");
+            }
+
+            String line = output.getOut().lines().filter(l -> l.contains("structured logging check"))
+                    .findFirst().orElseThrow();
+            assertThat(line).startsWith("{").endsWith("}")
+                    .contains("\"requestId\":\"json-log-check-01\"")
+                    .contains("\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"")
+                    .contains("\"message\":\"structured logging check\"");
         }
     }
 

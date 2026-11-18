@@ -1,5 +1,6 @@
 package com.sugarcrumbs;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -8,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -31,6 +33,9 @@ class WebEdgeConfig {
     /** Just ahead of Spring Security's filter chain (order -100), so a throttled request does no auth work. */
     static final int RATE_LIMIT_FILTER_ORDER = -105;
 
+    /** Right after Spring's observation filter (highest precedence + 1), which opens the request's span. */
+    static final int REQUEST_ID_FILTER_ORDER = Ordered.HIGHEST_PRECEDENCE + 2;
+
     /**
      * Only the configured origins ({@code app.cors.allowed-origins}, comma-separated, exact
      * matches). No credentials mode: the SPA sends its token in the Authorization header and
@@ -50,8 +55,10 @@ class WebEdgeConfig {
         CorsConfiguration api = new CorsConfiguration();
         api.setAllowedOrigins(origins);
         api.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE"));
-        api.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
-        api.setExposedHeaders(List.of(HttpHeaders.LOCATION, HttpHeaders.RETRY_AFTER, "X-RateLimit-Remaining"));
+        api.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE, RequestIdFilter.HEADER));
+        // X-Request-Id: so the SPA can show it with an error, for the Owner to pass on.
+        api.setExposedHeaders(List.of(HttpHeaders.LOCATION, HttpHeaders.RETRY_AFTER, "X-RateLimit-Remaining",
+                RequestIdFilter.HEADER));
         api.setAllowCredentials(false);
         api.setMaxAge(Duration.ofHours(1));
 
@@ -68,6 +75,14 @@ class WebEdgeConfig {
         FilterRegistrationBean<RateLimitFilter> registration =
                 new FilterRegistrationBean<>(new RateLimitFilter(properties, resolver));
         registration.setOrder(RATE_LIMIT_FILTER_ORDER);
+        return registration;
+    }
+
+    @Bean
+    FilterRegistrationBean<RequestIdFilter> requestIdFilter() {
+        FilterRegistrationBean<RequestIdFilter> registration = new FilterRegistrationBean<>(new RequestIdFilter());
+        registration.setOrder(REQUEST_ID_FILTER_ORDER);
+        registration.setDispatcherTypes(DispatcherType.REQUEST, DispatcherType.ASYNC, DispatcherType.ERROR);
         return registration;
     }
 }

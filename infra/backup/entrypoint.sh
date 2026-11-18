@@ -39,6 +39,12 @@ schedule=${BACKUP_SCHEDULE:-30 2 * * *}
 echo "$schedule . /run/backup.env && /usr/local/bin/backup.sh > /proc/1/fd/1 2>&1" > /etc/crontabs/root
 log "scheduled: $schedule (TZ=${TZ:-UTC})"
 
+# Prometheus scrapes the last good backup's time from here (#26, alert BackupStale); only on the internal
+# network, the port is never published. Serves the file backup.sh writes, starting with what is on disk.
+/usr/local/bin/backup.sh --metrics-only
+httpd -p 9101 -h "${METRICS_DIR:-/run/metrics}"
+log "metrics on :9101/metrics"
+
 # A fresh deployment (or one down past its slot) gets a backup now rather than tomorrow night.
 last=$(cat "${BACKUP_DIR:-/backups}/last-success" 2>/dev/null || echo 0)
 if [ $(( $(date +%s) - last )) -ge 86400 ]; then

@@ -7,6 +7,8 @@ import com.sugarcrumbs.identity.domain.RefreshToken;
 import com.sugarcrumbs.identity.persistence.OwnerRepository;
 import com.sugarcrumbs.identity.persistence.RefreshTokenRepository;
 import com.nimbusds.jose.jwk.RSAKey;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -55,6 +57,8 @@ public class AuthService {
     private final JwtEncoder jwtEncoder;
     private final RSAKey signingKey;
     private final JwtProperties properties;
+    /** Wrong email or password; a burst means someone is guessing (Grafana, Business dashboard). */
+    private final Counter loginFailures;
     private final Clock clock = Clock.systemUTC();
     private final SecureRandom random = new SecureRandom();
 
@@ -63,13 +67,16 @@ public class AuthService {
 
     public AuthService(OwnerRepository ownerRepository, RefreshTokenRepository refreshTokenRepository,
                        PasswordEncoder passwordEncoder, JwtEncoder jwtEncoder, RSAKey jwtSigningKey,
-                       JwtProperties properties) {
+                       JwtProperties properties, MeterRegistry meterRegistry) {
         this.ownerRepository = ownerRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtEncoder = jwtEncoder;
         this.signingKey = jwtSigningKey;
         this.properties = properties;
+        this.loginFailures = Counter.builder("baker.auth.login.failures")
+                .description("Owner logins refused for a wrong email or password")
+                .register(meterRegistry);
     }
 
     /**
@@ -82,18 +89,22 @@ public class AuthService {
         Owner owner = ownerRepository.findByEmail(email.strip().toLowerCase(Locale.ROOT)).orElse(null);
         if (owner == null) {
             passwordEncoder.matches(password, dummyHash());
-            log.info("Owner login failed");
-            throw new BadCredentialsException(INVALID_LOGIN);
+            throw loginFailed();
         }
         if (!passwordEncoder.matches(password, owner.getPasswordHash())) {
-            log.info("Owner login failed");
-            throw new BadCredentialsException(INVALID_LOGIN);
+            throw loginFailed();
         }
         Instant now = clock.instant();
         String refreshToken = newRefreshToken();
         refreshTokenRepository.save(RefreshToken.startFamily(owner.getId(), hash(refreshToken),
                 now.plus(properties.refreshTokenTtl())));
         return issue(owner.getId(), refreshToken, now);
+    }
+
+    private BadCredentialsException loginFailed() {
+        log.info("Owner login failed");
+        loginFailures.increment();
+        return new BadCredentialsException(INVALID_LOGIN);
     }
 
     /**

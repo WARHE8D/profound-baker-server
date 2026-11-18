@@ -8,6 +8,7 @@ import com.sugarcrumbs.ordering.domain.InvoiceStatus;
 import com.sugarcrumbs.ordering.domain.Order;
 import com.sugarcrumbs.ordering.domain.PaymentMethod;
 import com.sugarcrumbs.ordering.persistence.InvoiceRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +31,7 @@ class InvoiceServiceTests {
 
     private final InvoiceRepository invoiceRepository = mock(InvoiceRepository.class);
     private final OwnerApi ownerApi = mock(OwnerApi.class);
-    private final InvoiceService service = new InvoiceService(invoiceRepository, ownerApi);
+    private final InvoiceService service = new InvoiceService(invoiceRepository, ownerApi, new SimpleMeterRegistry());
 
     private final Order order = Order.builder().reference("SC-7F3K2").pickupAt(Instant.parse("2026-12-01T10:00:00Z"))
             .guestContact(new GuestContact("Ada", "ada@example.com", "1"))
