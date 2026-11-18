@@ -1,0 +1,33 @@
+# Grafana datasources, provisioned from this file on every start (#26): never configure them in the UI.
+# Fixed uids, because the dashboards in infra/grafana/dashboards refer to them.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+      # Latency panels show exemplars; clicking one opens that request's trace in Tempo.
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # Explore > Tempo > Service Graph, from the metrics Tempo's generator writes to Prometheus.
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false

@@ -16,7 +16,8 @@ copied to that bucket encrypted with `BACKUP_ENCRYPTION_PASSWORD` (rclone crypt)
 long. The service takes a backup at start-up too if none succeeded in the last day.
 
 **Is it working?** `docker compose -f docker-compose.prod.yml ps backup` shows `healthy` while the last
-good backup is under 26 hours old. Its log (`docker compose -f docker-compose.prod.yml logs backup`)
+good backup is under 26 hours old, and the `BackupStale` alert fires once it is older (see
+[Observability](#observability)). Its log (`docker compose -f docker-compose.prod.yml logs backup`)
 lists every run, and warns when there is no off-box copy. Take one by hand with
 `docker compose -f docker-compose.prod.yml exec backup backup.sh`.
 
@@ -75,4 +76,39 @@ scratch database and look at it:
 docker compose -f docker-compose.prod.yml exec backup sh -c \
     'createdb restore_check && pg_restore --no-owner -d restore_check "$(ls -1 /backups/baker-*.dump | tail -n 1)" \
      && psql -d restore_check -c "SELECT count(*) FROM ordering.orders" && dropdb restore_check'
+```
+
+## Observability
+
+The production stack also runs Prometheus, Tempo and Grafana (#26). Their configuration is in
+`infra/` and is loaded from those files on every start: change a file and redeploy, never the UI.
+
+| What | Where it comes from |
+|---|---|
+| Metrics | Prometheus scrapes the app's `/actuator/prometheus` on the internal management port (9080) every 15s, and the backup job's last-success time from `backup:9101`. Kept `PROMETHEUS_RETENTION` (default 30 days). |
+| Traces | The app sends every request's trace to Tempo over OTLP. Kept 7 days. Tempo turns them into the service graph and request metrics. |
+| Logs | One JSON object per line on the app container's stdout (`docker compose -f docker-compose.prod.yml logs app`), with `traceId`, `spanId` and `requestId` fields. |
+| Dashboards | Grafana, folder *SugarCrumbs*: **Service overview** (traffic, 4xx/5xx by route, p50/p95/p99 latency, JVM, database pool) and **Business** (orders by status, pending backlog, auto-cancelled orders, revenue, failed logins, last backup). |
+| Alerts | `infra/prometheus/alerts.yml`: a service down, 5xx rate over 5%, a growing pending backlog, auto-cancelled orders, a burst of failed logins, a stale or failed backup. They show in Grafana under *Alerting*. Nothing sends them anywhere yet: that needs an Alertmanager. |
+
+**Open Grafana.** It listens on the server's loopback only, never on the internet. Tunnel to it, then
+browse to <http://localhost:3000> and sign in as `GRAFANA_ADMIN_USER` (default `admin`) with
+`GRAFANA_ADMIN_PASSWORD`:
+
+```bash
+ssh -L 3000:127.0.0.1:3000 <user>@<server>
+```
+
+**From an error to its cause.** Every response has an `X-Request-Id` header (the SPA may also send one,
+8-64 letters, digits, `.`, `_` or `-`). Find its log lines with
+`docker compose -f docker-compose.prod.yml logs app | grep <request id>`; each line also has the
+`traceId`. In Grafana, *Explore > Tempo* finds the trace by trace id, or by the `request.id` span
+attribute. Latency panels show exemplar dots that open the trace of that request.
+
+**Change the alert rules** together with their tests in `infra/prometheus/alerts.test.yml`; CI runs
+them with promtool (`AlertRulesTests`), or by hand:
+
+```bash
+docker run --rm -v ./infra/prometheus:/etc/prometheus -w /etc/prometheus --entrypoint promtool \
+    prom/prometheus:v3.9.1 test rules alerts.test.yml
 ```

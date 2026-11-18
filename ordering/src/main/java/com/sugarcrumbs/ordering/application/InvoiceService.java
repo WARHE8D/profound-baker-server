@@ -8,10 +8,14 @@ import com.sugarcrumbs.ordering.domain.Order;
 import com.sugarcrumbs.ordering.domain.PaymentMethod;
 import com.sugarcrumbs.ordering.persistence.InvoiceRepository;
 import com.sugarcrumbs.ordering.persistence.InvoiceSpecifications;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -36,10 +40,19 @@ public class InvoiceService {
 
     private final InvoiceRepository invoiceRepository;
     private final OwnerApi ownerApi;
+    /** Money recorded as paid, and given back (#26, Business dashboard). In the bakery's one currency. */
+    private final Counter paidAmount;
+    private final Counter refundedAmount;
 
-    public InvoiceService(InvoiceRepository invoiceRepository, OwnerApi ownerApi) {
+    public InvoiceService(InvoiceRepository invoiceRepository, OwnerApi ownerApi, MeterRegistry meterRegistry) {
         this.invoiceRepository = invoiceRepository;
         this.ownerApi = ownerApi;
+        this.paidAmount = Counter.builder("baker.invoices.paid.amount")
+                .description("Invoice totals recorded as paid")
+                .register(meterRegistry);
+        this.refundedAmount = Counter.builder("baker.invoices.refunded.amount")
+                .description("Invoice totals refunded")
+                .register(meterRegistry);
     }
 
     /**
@@ -98,12 +111,16 @@ public class InvoiceService {
     public Invoice markPaid(UUID id, PaymentMethod method, String reference, Instant paidAt) {
         Invoice invoice = getOrThrow(id);
         invoice.markPaid(method, reference, paidAt != null ? paidAt : Instant.now());
+        BigDecimal total = invoice.getTotal();
+        afterCommit(() -> paidAmount.increment(total.doubleValue()));
         return invoice;
     }
 
     public Invoice refund(UUID id) {
         Invoice invoice = getOrThrow(id);
         invoice.refund(Instant.now());
+        BigDecimal total = invoice.getTotal();
+        afterCommit(() -> refundedAmount.increment(total.doubleValue()));
         return invoice;
     }
 
@@ -115,5 +132,19 @@ public class InvoiceService {
         invoiceRepository.findByOrderId(order.getId())
                 .filter(invoice -> invoice.getStatus() == InvoiceStatus.PENDING)
                 .ifPresent(Invoice::voidInvoice);
+    }
+
+    /** Counted only once the change is committed: a payment that rolls back was never revenue. */
+    private static void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 }

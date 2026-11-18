@@ -52,6 +52,15 @@ class ConfigurationFilesTests {
                         .matches(REQUIRED_PLACEHOLDER));
     }
 
+    /** #26: prod logs are JSON (one object per line, MDC ids as fields); dev keeps the readable pattern. */
+    @Test
+    void prodLogsAreStructured() {
+        assertThat(load("application-prod.properties").getProperty("logging.structured.format.console")).isEqualTo("ecs");
+        assertThat(load("application.properties").getProperty("logging.structured.format.console")).isNull();
+        assertThat(load("application.properties").getProperty("logging.pattern.correlation"))
+                .contains("%X{traceId", "%X{spanId", "%X{requestId");
+    }
+
     @Test
     void prodNeverLogsSql() {
         assertThat(load("application.properties").getProperty("spring.jpa.show-sql")).isEqualTo("false");

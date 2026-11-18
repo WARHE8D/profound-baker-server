@@ -9,6 +9,7 @@
 #   UPLOADS_DIR            uploaded images to archive alongside (default /data/uploads; skipped if absent)
 #   BACKUP_RETENTION_DAYS  days to keep, here and off-box (default 14)
 #   BACKUP_REMOTE          rclone destination for the off-box copy; empty means none (a warning each run)
+#   METRICS_DIR            where the Prometheus metrics file is written (default /run/metrics; see write_metrics)
 set -eu
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
@@ -17,6 +18,25 @@ RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-14}
 REMOTE=${BACKUP_REMOTE:-}
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) backup: $*"; }
+
+# The time of the last good backup as a Prometheus gauge (#26): entrypoint.sh serves METRICS_DIR over HTTP
+# and the BackupStale alert fires when it gets old. Written to a temporary file and renamed, so a scrape
+# never reads half a file. Usable on its own: `backup.sh --metrics-only` just refreshes the file.
+write_metrics() {
+    dir=${METRICS_DIR:-/run/metrics}
+    mkdir -p "$dir"
+    {
+        echo "# HELP baker_backup_last_success_timestamp_seconds Unix time of the last successful backup (0: none yet)."
+        echo "# TYPE baker_backup_last_success_timestamp_seconds gauge"
+        echo "baker_backup_last_success_timestamp_seconds $(cat "$BACKUP_DIR/last-success" 2>/dev/null || echo 0)"
+    } > "$dir/metrics.tmp"
+    mv "$dir/metrics.tmp" "$dir/metrics"
+}
+
+if [ "${1:-}" = "--metrics-only" ]; then
+    write_metrics
+    exit 0
+fi
 
 case "$RETENTION_DAYS" in
     '' | *[!0-9]* | 0) log "BACKUP_RETENTION_DAYS must be a positive whole number of days"; exit 2 ;;
@@ -63,4 +83,5 @@ else
 fi
 
 date -u +%s > "$BACKUP_DIR/last-success"
+write_metrics
 log "done"
