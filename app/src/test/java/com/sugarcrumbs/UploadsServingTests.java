@@ -23,6 +23,14 @@ import org.springframework.web.client.RestClient;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import javax.imageio.ImageIO;
 import java.util.List;
 import java.util.Map;
 
@@ -36,7 +44,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class UploadsServingTests extends AbstractIntegrationTest {
 
-    private static final byte[] PNG = {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 1, 2, 3};
+    /** A real 64 x 48 PNG: uploads are decoded and re-encoded (#25), so a fake one would be refused. */
+    private static final byte[] PNG = realPng();
 
     @TempDir
     static Path tempDir;
@@ -82,10 +91,14 @@ class UploadsServingTests extends AbstractIntegrationTest {
         assertThat(image.getStatusCode().value()).isEqualTo(200);
         assertThat(image.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);
         assertThat(image.getHeaders().getCacheControl()).contains("max-age=31536000", "public", "immutable");
-        assertThat(image.getBody()).isEqualTo(PNG);
-
         Path file = tempDir.resolve("uploads").resolve(url.substring("/uploads/".length()));
         assertThat(file).exists();
+        // Served as stored: the re-encoded file, not the upload's original bytes.
+        assertThat(image.getBody()).isEqualTo(Files.readAllBytes(file));
+        assertThat(ImageIO.read(new ByteArrayInputStream(image.getBody())).getWidth()).isEqualTo(64);
+
+        String thumbnailUrl = url.replace(".png", ".thumb.png");
+        assertThat(http.get().uri(thumbnailUrl).retrieve().toBodilessEntity().getStatusCode().value()).isEqualTo(200);
 
         ResponseEntity<Map> removed = http.delete()
                 .uri(uriBuilder -> uriBuilder.path("/api/catalogue/items/{id}/images").queryParam("url", url).build(itemId))
@@ -95,6 +108,51 @@ class UploadsServingTests extends AbstractIntegrationTest {
 
         assertThat(file).doesNotExist();
         assertThat(http.get().uri(url).retrieve().toBodilessEntity().getStatusCode().value()).isEqualTo(404);
+        assertThat(http.get().uri(thumbnailUrl).retrieve().toBodilessEntity().getStatusCode().value()).isEqualTo(404);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void anItemListsAThumbnailForEachImage() {
+        String itemId = createItem();
+        String url = uploadImage(itemId);
+
+        Map<String, Object> item = http.get().uri("/api/catalogue/items/{id}", itemId).retrieve().body(Map.class);
+
+        assertThat((List<String>) item.get("imageUrls")).containsExactly(url);
+        assertThat((List<String>) item.get("thumbnailUrls")).containsExactly(url.replace(".png", ".thumb.png"));
+    }
+
+    @Test
+    void aFileThatIsNotAnImageIsRefusedWhateverItClaims() {
+        String itemId = createItem();
+        HttpHeaders partHeaders = new HttpHeaders();
+        partHeaders.setContentType(MediaType.IMAGE_PNG);
+        partHeaders.setContentDispositionFormData("file", "cake.png");
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", new HttpEntity<>(new ByteArrayResource("<script>alert(1)</script>".getBytes()), partHeaders));
+
+        ResponseEntity<Map> response = http.post().uri("/api/catalogue/items/{id}/images/upload", itemId)
+                .contentType(MediaType.MULTIPART_FORM_DATA).body(body)
+                .retrieve().toEntity(Map.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(400);
+        assertThat(response.getBody()).containsEntry("message", "not a PNG, JPEG or WebP image");
+    }
+
+    private static byte[] realPng() {
+        BufferedImage image = new BufferedImage(64, 48, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setColor(Color.ORANGE);
+        g.fillRect(0, 0, 64, 48);
+        g.dispose();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            ImageIO.write(image, "png", out);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return out.toByteArray();
     }
 
     @Test

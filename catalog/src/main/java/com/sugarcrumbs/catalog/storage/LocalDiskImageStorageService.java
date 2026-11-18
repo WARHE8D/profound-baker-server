@@ -9,8 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Set;
+import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 
 /**
@@ -24,15 +23,19 @@ import java.util.UUID;
 @Service
 public class LocalDiskImageStorageService implements ImageStorageService {
 
-    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("image/png", "image/jpeg", "image/webp");
+    /** Marks the thumbnail next to an image: {@code abc.jpg} has {@code abc.thumb.jpg}. */
+    private static final String THUMBNAIL_MARKER = ".thumb";
 
+    private final ImageProcessor imageProcessor;
     private final Path rootDirectory;
     private final String publicBaseUrl;
 
     public LocalDiskImageStorageService(
+            ImageProcessor imageProcessor,
             @Value("${app.storage.local-path:./uploads}") String localPath,
             @Value("${app.storage.public-base-url:/uploads}") String publicBaseUrl
     ) {
+        this.imageProcessor = imageProcessor;
         this.rootDirectory = Path.of(localPath).toAbsolutePath().normalize();
         this.publicBaseUrl = publicBaseUrl.endsWith("/") ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1) : publicBaseUrl;
         try {
@@ -47,26 +50,30 @@ public class LocalDiskImageStorageService implements ImageStorageService {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("file is required");
         }
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType)) {
-            throw new IllegalArgumentException("unsupported image type: " + contentType);
+        // The declared Content-Type and file name are ignored: the processor decides what the bytes are.
+        ImageProcessor.ProcessedImage processed;
+        try {
+            processed = imageProcessor.process(file.getBytes());
+        } catch (IOException e) {
+            throw new ImageStorageException("failed to read uploaded file", e);
         }
 
-        String extension = extensionFor(contentType);
-        String filename = UUID.randomUUID() + extension;
-
+        String name = UUID.randomUUID().toString();
         Path targetDir = rootDirectory.resolve(sanitize(subfolder));
-        Path targetFile = targetDir.resolve(filename);
-
+        Path image = targetDir.resolve(name + processed.extension());
+        Path thumbnail = targetDir.resolve(name + THUMBNAIL_MARKER + processed.extension());
         try {
             Files.createDirectories(targetDir);
-            // REPLACE_EXISTING is defensive only — a random UUID filename should never collide.
-            Files.copy(file.getInputStream(), targetFile, StandardCopyOption.REPLACE_EXISTING);
+            // The thumbnail first: an image on disk always has its thumbnail.
+            Files.write(thumbnail, processed.thumbnail(), StandardOpenOption.CREATE_NEW);
+            Files.write(image, processed.image(), StandardOpenOption.CREATE_NEW);
         } catch (IOException e) {
+            deleteQuietly(image);
+            deleteQuietly(thumbnail);
             throw new ImageStorageException("failed to store uploaded file", e);
         }
 
-        return publicBaseUrl + "/" + sanitize(subfolder) + "/" + filename;
+        return publicBaseUrl + "/" + sanitize(subfolder) + "/" + image.getFileName();
     }
 
     @Override
@@ -77,8 +84,36 @@ public class LocalDiskImageStorageService implements ImageStorageService {
         }
         try {
             Files.deleteIfExists(file);
+            Files.deleteIfExists(thumbnailOf(file));
         } catch (IOException e) {
             throw new ImageStorageException("failed to delete stored file", e);
+        }
+    }
+
+    @Override
+    public String thumbnailUrl(String url) {
+        Path file = resolveOwnedFile(url);
+        if (file == null || !Files.exists(thumbnailOf(file))) {
+            return url;
+        }
+        return url.substring(0, url.length() - file.getFileName().toString().length())
+                + thumbnailOf(file).getFileName();
+    }
+
+    /** {@code abc.jpg} -> {@code abc.thumb.jpg}, in the same directory. */
+    private static Path thumbnailOf(Path image) {
+        String name = image.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        String thumbnail = dot < 0 ? name + THUMBNAIL_MARKER
+                : name.substring(0, dot) + THUMBNAIL_MARKER + name.substring(dot);
+        return image.resolveSibling(thumbnail);
+    }
+
+    private static void deleteQuietly(Path file) {
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+            // Already failing; the original error is the one worth reporting.
         }
     }
 
@@ -111,14 +146,6 @@ public class LocalDiskImageStorageService implements ImageStorageService {
         } catch (InvalidPathException e) {
             return null;
         }
-    }
-
-    private String extensionFor(String contentType) {
-        return switch (contentType) {
-            case "image/png" -> ".png";
-            case "image/webp" -> ".webp";
-            default -> ".jpg";
-        };
     }
 
     /** Strips path separators so a caller-supplied subfolder can't escape the root directory (path traversal). */

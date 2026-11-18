@@ -5,6 +5,12 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * An item as the Owner sees it.
+ *
+ * @param thumbnailUrls one per {@code imageUrls}, in the same order: the image's thumbnail, or the image's
+ *                      own URL when it has none (hosted elsewhere, or uploaded before thumbnails existed)
+ */
 public record ItemResponse(
         UUID id,
         String name,
@@ -16,6 +22,7 @@ public record ItemResponse(
         Integer stockQuantity,
         boolean orderable,
         List<String> imageUrls,
+        List<String> thumbnailUrls,
         Instant createdAt,
         Instant updatedAt
 ) {
