@@ -23,22 +23,45 @@ class LocalDiskImageStorageServiceTests {
     @BeforeEach
     void setUp() {
         root = tempDir.resolve("uploads");
-        storage = new LocalDiskImageStorageService(root.toString(), "/uploads/");
+        storage = new LocalDiskImageStorageService(new ImageProcessor(), root.toString(), "/uploads/");
     }
 
     @Test
-    void storeWritesTheFileUnderARandomNameAndReturnsItsPublicUrl() throws IOException {
+    void storeWritesTheImageAndItsThumbnailUnderARandomNameAndReturnsItsPublicUrl() {
         String url = storage.store(png(), "items");
 
         assertThat(url).matches("/uploads/items/[0-9a-f-]{36}\\.png");
-        assertThat(Files.readAllBytes(fileFor(url))).isEqualTo(new byte[]{1, 2, 3});
+        assertThat(TestImages.read(readBytes(fileFor(url))).getWidth()).isEqualTo(60);
+        String thumbnailUrl = storage.thumbnailUrl(url);
+        assertThat(thumbnailUrl).isEqualTo(url.replace(".png", ".thumb.png"));
+        assertThat(fileFor(thumbnailUrl)).exists();
+    }
+
+    /** The bytes decide: a JPEG sent as "image/png" named cake.png is stored as the JPEG it is. */
+    @Test
+    void theDeclaredTypeAndNameAreIgnored() {
+        MockMultipartFile disguised = new MockMultipartFile("file", "cake.png", "image/png", TestImages.jpeg(40, 40));
+
+        assertThat(storage.store(disguised, "items")).endsWith(".jpg");
     }
 
     @Test
-    void storeRejectsTypesOutsideTheAllowlist() {
-        MockMultipartFile svg = new MockMultipartFile("file", "x.svg", "image/svg+xml", new byte[]{1});
+    void storeRejectsAnythingThatIsNotARealImage() {
+        MockMultipartFile svg = new MockMultipartFile("file", "x.svg", "image/svg+xml", "<svg/>".getBytes());
+        MockMultipartFile fakePng = new MockMultipartFile("file", "x.png", "image/png", new byte[]{1, 2, 3});
 
         assertThatThrownBy(() -> storage.store(svg, "items")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> storage.store(fakePng, "items")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(root.resolve("items")).doesNotExist();
+    }
+
+    @Test
+    void imagesFromElsewhereOrWithoutAThumbnailAreTheirOwnThumbnail() throws IOException {
+        Files.createDirectories(root.resolve("items"));
+        Files.write(root.resolve("items/old.png"), TestImages.png(10, 10, false));
+
+        assertThat(storage.thumbnailUrl("/uploads/items/old.png")).isEqualTo("/uploads/items/old.png");
+        assertThat(storage.thumbnailUrl("https://cdn.example.com/b.png")).isEqualTo("https://cdn.example.com/b.png");
     }
 
     @Test
@@ -50,12 +73,14 @@ class LocalDiskImageStorageServiceTests {
     }
 
     @Test
-    void deleteRemovesAStoredFile() {
+    void deleteRemovesAStoredFileAndItsThumbnail() {
         String url = storage.store(png(), "items");
+        Path thumbnail = fileFor(storage.thumbnailUrl(url));
 
         storage.delete(url);
 
         assertThat(fileFor(url)).doesNotExist();
+        assertThat(thumbnail).doesNotExist();
     }
 
     @Test
@@ -104,7 +129,15 @@ class LocalDiskImageStorageServiceTests {
         return root.resolve(url.substring("/uploads/".length()));
     }
 
+    private static byte[] readBytes(Path file) {
+        try {
+            return Files.readAllBytes(file);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
     private static MockMultipartFile png() {
-        return new MockMultipartFile("file", "cake.png", "image/png", new byte[]{1, 2, 3});
+        return new MockMultipartFile("file", "cake.png", "image/png", TestImages.png(60, 40, false));
     }
 }
