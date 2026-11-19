@@ -60,6 +60,7 @@ Swagger UI is the full reference. The things worth knowing up front:
 | Orders | `POST /api/public/orders` (checkout), `GET /api/public/orders/by-token/{token}`, `POST …/by-token/{token}/cancel` | `/api/orders/**`: list and filter, confirm, reject, start-preparation, fulfill, cancel, reschedule, edit lines and notes |
 | Invoices | | `/api/invoices/**`, `/api/orders/{id}/invoice`: discount, pay, refund |
 | Dashboard | | `GET /api/dashboard/summary`, `GET /api/dashboard/production?date=` |
+| Bakery | `GET /api/public/bakery`: `businessName`, `timeZone`, `logoUrl`, `phone`, `address` | |
 | Owner | | `/api/auth/me`, `/api/auth/logout`, `/api/owner/profile`, `/api/owner/password` |
 
 **Signing in.** `POST /api/auth/login` with `{"email", "password"}` returns `accessToken` (valid for
@@ -69,9 +70,10 @@ once:** keep the new one. Sending a used refresh token again counts as theft and
 that login. `POST /api/auth/logout` with `{"refreshToken"}` ends the session.
 
 **Checkout and the magic link.** Read the open slots from `/api/public/availability`. Each day lists `slots`
-with `startTime`, `remainingCapacity` and `bookable`. Slot times are local times in the Owner's time zone
-(`/api/owner/profile`), and `pickupAt` is the matching UTC instant, for example
-`2026-11-21T10:00:00Z` for 10:00 in a UTC bakery. Checkout sends `pickupAt`, `guestContact` (`name`,
+with `startTime`/`endTime` (local times in the bakery's time zone, for display), `startsAt`/`endsAt` (the
+same moments as UTC instants), `remainingCapacity` and `bookable`. Send the chosen slot's `startsAt` as
+`pickupAt`; don't convert zones in the SPA. `GET /api/public/bakery` gives the `timeZone` for labelling
+times and working out the bakery's "today". Checkout sends `pickupAt`, `guestContact` (`name`,
 `email`, `phone`), optional `notes` and `lines` (`itemId`, `quantity`). The response's `accessToken` is
 the guest's magic-link token. **It is returned only this once**: put it in the link you show the guest
 (`/api/public/orders/by-token/{token}` reads the order). Unknown or expired tokens get 404.

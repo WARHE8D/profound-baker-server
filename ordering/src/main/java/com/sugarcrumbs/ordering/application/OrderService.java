@@ -36,8 +36,8 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -443,7 +443,10 @@ public class OrderService {
         // Slots are local times in the bakery's zone, not the server's.
         ZonedDateTime local = pickupAt.atZone(ownerApi.settings().timeZone());
         LocalDate date = local.toLocalDate();
-        LocalTime time = local.toLocalTime().withSecond(0).withNano(0);
+        // Matched as an instant against the slot's startsAt, not as a local time: around a daylight-saving
+        // change a local time can occur twice, and only the first occurrence is the slot whose capacity is
+        // counted. Seconds are ignored, as before.
+        Instant slotStart = pickupAt.truncatedTo(ChronoUnit.MINUTES);
 
         workingHoursRepository.findForUpdate(ownerApi.currentOwnerId(), date.getDayOfWeek());
         DayAvailabilityResponse day = availabilityService.computeForDate(date, excludeOrderId);
@@ -453,7 +456,7 @@ public class OrderService {
         }
 
         boolean matchesBookableSlot = day.slots().stream()
-                .anyMatch(slot -> slot.startTime().equals(time) && slot.bookable());
+                .anyMatch(slot -> slot.startsAt().equals(slotStart) && slot.bookable());
         if (!matchesBookableSlot) {
             throw new ConflictException(
                     "the requested time is not an available pickup slot — check GET /api/public/availability first");

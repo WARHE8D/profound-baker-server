@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +35,7 @@ class OpenApiSpecTests extends AbstractIntegrationTest {
             "GET /api/public/catalogue/items/{id}",
             "GET /api/public/catalogue/categories",
             "GET /api/public/availability",
+            "GET /api/public/bakery",
             "POST /api/public/orders",
             "GET /api/public/orders/by-token/{token}",
             "POST /api/public/orders/by-token/{token}/cancel");
@@ -155,6 +157,43 @@ class OpenApiSpecTests extends AbstractIntegrationTest {
         assertThat(strings(checkout.path("required"))).contains("id", "reference", "accessToken");
         assertThat(types(checkout.path("properties").path("notes"))).contains("null");
         assertThat(types(checkout.path("properties").path("accessToken"))).containsExactly("string");
+    }
+
+    /** Spring reads flat page/size/sort, so the spec must not offer a "pageable" object (sent as ?pageable[page]=1). */
+    @Test
+    void pagedOperationsTakeOptionalPageSizeAndSort() {
+        Map<String, Integer> defaultSizes = Map.of(
+                "GET /api/public/catalogue/items", 20,
+                "GET /api/catalogue/items", 20,
+                "GET /api/orders", 50,
+                "GET /api/invoices", 50);
+        defaultSizes.forEach((operation, defaultSize) -> {
+            Map<String, JsonNode> parameters = new HashMap<>();
+            operation(operation).path("parameters").forEach(p -> parameters.put(p.path("name").asString(), p));
+
+            assertThat(parameters).as(operation).containsKeys("page", "size", "sort").doesNotContainKey("pageable");
+            for (String name : List.of("page", "size", "sort")) {
+                assertThat(parameters.get(name).path("in").asString()).as("%s %s", operation, name).isEqualTo("query");
+                assertThat(parameters.get(name).path("required").asBoolean(false)).as("%s %s", operation, name).isFalse();
+            }
+            assertThat(parameters.get("size").path("schema").path("default").asInt()).as(operation).isEqualTo(defaultSize);
+        });
+    }
+
+    @Test
+    void slotsCarryTheirInstantsAndTheBakeryIsPublic() {
+        JsonNode slot = schema("TimeSlotResponse").path("properties");
+        for (String field : List.of("startsAt", "endsAt")) {
+            assertThat(types(slot.path(field))).as(field).containsExactly("string");
+            assertThat(slot.path(field).path("format").asString()).as(field).isEqualTo("date-time");
+        }
+
+        JsonNode bakery = operation("GET /api/public/bakery").path("responses").path("200")
+                .path("content").path("application/json").path("schema");
+        assertThat(bakery.path("$ref").asString()).endsWith("/PublicBakeryResponse");
+        assertThat(strings(schema("PublicBakeryResponse").path("required")))
+                .containsExactlyInAnyOrder("businessName", "timeZone", "logoUrl", "phone", "address");
+        assertThat(types(schema("PublicBakeryResponse").path("properties").path("timeZone"))).containsExactly("string");
     }
 
     @Test

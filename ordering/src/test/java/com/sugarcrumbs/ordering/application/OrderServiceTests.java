@@ -36,6 +36,7 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
@@ -157,6 +158,37 @@ class OrderServiceTests {
                 .isThrownBy(() -> service.reschedule(UUID.randomUUID(), Instant.now().minusSeconds(60)))
                 .withMessage("pickupAt must be in the future");
         verifyNoInteractions(orderRepository, workingHoursRepository, availabilityService);
+    }
+
+    @Test
+    void secondsInPickupAtAreIgnoredWhenMatchingTheSlot() {
+        stubOpenSlot();
+
+        service.place(checkout(pickupAt.plusSeconds(42), List.of(new OrderLineRequest(UUID.randomUUID(), 1))));
+
+        verify(orderRepository).save(any(Order.class));
+    }
+
+    /**
+     * New York falls back on 7 Nov 2027, so 01:00 local happens at 05:00Z and again at 06:00Z. The slot,
+     * and the window its orders are counted in, is the first; the second must not slip in beside it.
+     */
+    @Test
+    void aRepeatedLocalTimeOnlyMatchesTheSlotsOwnInstant() {
+        ZoneId newYork = ZoneId.of("America/New_York");
+        LocalDate fallBack = LocalDate.of(2027, 11, 7);
+        Instant first = Instant.parse("2027-11-07T05:00:00Z");
+        Instant second = Instant.parse("2027-11-07T06:00:00Z");
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(newYork));
+        when(availabilityService.computeForDate(eq(fallBack), any())).thenReturn(DayAvailabilityResponse.open(fallBack,
+                List.of(new TimeSlotResponse(LocalTime.of(1, 0), LocalTime.of(1, 30),
+                        first, first.plus(30, ChronoUnit.MINUTES), 1, 1, true))));
+
+        assertThatThrownBy(() -> service.place(checkout(second, List.of(new OrderLineRequest(UUID.randomUUID(), 1)))))
+                .isInstanceOf(ConflictException.class);
+
+        service.place(checkout(first, List.of(new OrderLineRequest(UUID.randomUUID(), 1))));
+        verify(orderRepository).save(any(Order.class));
     }
 
     @Test
@@ -480,7 +512,8 @@ class OrderServiceTests {
     private void stubOpenSlot() {
         when(workingHoursRepository.findForUpdate(ownerId, weekday())).thenReturn(Optional.empty());
         when(availabilityService.computeForDate(eq(day()), any())).thenReturn(DayAvailabilityResponse.open(day(),
-                List.of(new TimeSlotResponse(LocalTime.of(9, 0), LocalTime.of(10, 0), 1, 1, true))));
+                List.of(new TimeSlotResponse(LocalTime.of(9, 0), LocalTime.of(10, 0),
+                        pickupAt, pickupAt.plus(1, ChronoUnit.HOURS), 1, 1, true))));
     }
 
     private LocalDate day() {

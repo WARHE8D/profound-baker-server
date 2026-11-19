@@ -84,6 +84,43 @@ class AvailabilityServiceTests {
                 Instant.parse("2026-06-02T08:00:00Z"), Instant.parse("2026-06-02T08:30:00Z"), OrderStatus.WITHDRAWN);
     }
 
+    /** The slot's instants are the same window its orders are counted in, so a guest can send startsAt as-is. */
+    @Test
+    void eachSlotCarriesItsStartAndEndAsInstants() {
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("Asia/Tokyo")));
+        open("09:00", "10:00", 30, 1);
+
+        List<TimeSlotResponse> slots = service.computeForDate(DAY).slots();
+
+        assertThat(slots).extracting(TimeSlotResponse::startsAt).containsExactly(
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("2026-12-01T00:30:00Z"));
+        assertThat(slots).extracting(TimeSlotResponse::endsAt).containsExactly(
+                Instant.parse("2026-12-01T00:30:00Z"), Instant.parse("2026-12-01T01:00:00Z"));
+    }
+
+    /**
+     * New York, 2027: 02:30 doesn't exist on 14 March (resolved to the instant after the gap, 03:30 EDT),
+     * and 01:30 happens twice on 7 November (the first, EDT, is the slot).
+     */
+    @Test
+    void slotInstantsFollowJavasRulesAcrossDaylightSavingChanges() {
+        when(ownerApi.settings()).thenReturn(new OwnerSettings(ZoneId.of("America/New_York")));
+        LocalDate springForward = LocalDate.of(2027, 3, 14);
+        LocalDate fallBack = LocalDate.of(2027, 11, 7);
+        when(workingHoursRepository.findByOwnerIdAndDayOfWeek(ownerId, DayOfWeek.SUNDAY)).thenReturn(Optional.of(
+                WorkingHours.builder().ownerId(ownerId).dayOfWeek(DayOfWeek.SUNDAY)
+                        .startTime(t("01:30")).endTime(t("03:00")).slotDurationMinutes(60)
+                        .maxConcurrentBookings(1).build()));
+
+        TimeSlotResponse spring = service.computeForDate(springForward).slots().getFirst();
+        TimeSlotResponse fall = service.computeForDate(fallBack).slots().getFirst();
+
+        assertThat(spring.startsAt()).isEqualTo(Instant.parse("2027-03-14T06:30:00Z"));
+        assertThat(spring.endsAt()).isEqualTo(Instant.parse("2027-03-14T07:30:00Z"));
+        assertThat(fall.startsAt()).isEqualTo(Instant.parse("2027-11-07T05:30:00Z"));
+        assertThat(fall.endsAt()).isEqualTo(Instant.parse("2027-11-07T07:30:00Z"));
+    }
+
     @Test
     void splitsTheWindowIntoBackToBackSlots() {
         open("09:00", "11:00", 30, 2);

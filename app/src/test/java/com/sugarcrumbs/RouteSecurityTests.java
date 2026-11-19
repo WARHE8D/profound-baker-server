@@ -107,6 +107,7 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "PUT,    /api/public/catalogue/items/" + ID,
             "DELETE, /api/public/catalogue/items/" + ID,
             "POST,   /api/public/availability",
+            "PUT,    /api/public/bakery",
             // Default deny: a path nobody mapped is still behind authentication.
             "GET,    /api/not-a-route",
     })
@@ -128,6 +129,7 @@ class RouteSecurityTests extends AbstractIntegrationTest {
             "GET,  /api/public/catalogue/items/" + ID,
             "GET,  /api/public/catalogue/categories",
             "GET,  /api/public/availability?from=2026-12-01&to=2026-12-02",
+            "GET,  /api/public/bakery",
             "POST, /api/public/orders",
             "GET,  /api/public/orders/by-token/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "POST, /api/public/orders/by-token/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/cancel",

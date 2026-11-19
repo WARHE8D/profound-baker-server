@@ -119,20 +119,20 @@ public class AvailabilityService {
             if (!slotEnd.isAfter(cursor) || slotEnd.isAfter(hours.getEndTime())) {
                 break;
             }
+            // These instants are both what the slot's orders are counted between and what checkout
+            // compares pickupAt against, so the two can never disagree about which slot an order is in.
+            Instant startsAt = date.atTime(cursor).atZone(zone).toInstant();
+            Instant endsAt = date.atTime(slotEnd).atZone(zone).toInstant();
             int capacity = hours.getMaxConcurrentBookings();
-            int booked = bookedCount(date, cursor, slotEnd, excludeOrderId, zone);
+            int booked = bookedCount(startsAt, endsAt, excludeOrderId);
             int remaining = Math.max(0, capacity - booked);
-            slots.add(new TimeSlotResponse(cursor, slotEnd, capacity, remaining, remaining > 0));
+            slots.add(new TimeSlotResponse(cursor, slotEnd, startsAt, endsAt, capacity, remaining, remaining > 0));
             cursor = slotEnd;
         }
         return slots;
     }
 
-    private int bookedCount(LocalDate date, LocalTime slotStart, LocalTime slotEnd, UUID excludeOrderId,
-                            ZoneId zone) {
-        Instant slotStartInstant = date.atTime(slotStart).atZone(zone).toInstant();
-        Instant slotEndInstant = date.atTime(slotEnd).atZone(zone).toInstant();
-
+    private int bookedCount(Instant slotStartInstant, Instant slotEndInstant, UUID excludeOrderId) {
         if (excludeOrderId == null) {
             return (int) orderRepository.countByPickupAtGreaterThanEqualAndPickupAtLessThanAndStatusNotIn(
                     slotStartInstant, slotEndInstant, OrderStatus.WITHDRAWN);
