@@ -1,5 +1,127 @@
 # profound-baker-server
-app for a certain patissier
+
+The backend for **SugarCrumbs**, a bakery run by one baker (the Owner). Customers browse the catalogue and
+order as guests, with no accounts: each order gets a private magic link. The Owner signs in to manage items,
+opening hours, orders and invoices. It is a REST API for a separate web SPA (storefront and owner dashboard).
+
+**Stack:** Java 21, Spring Boot 4.1, Spring Modulith, PostgreSQL 17 with Flyway, JWT (RS256) auth, and
+Docker Compose with Caddy in production, plus Prometheus, Tempo and Grafana for observability.
+[CLAUDE.md](CLAUDE.md) holds the architecture, business and security rules in full; `docs/` holds the roadmap.
+
+## Layout
+
+A modular monolith: one deployable, with module boundaries checked by the build (`ModularityTests`), so
+a module can later become its own service.
+
+| Module | Owns |
+|---|---|
+| `common` | Shared kernel: base entity, `ApiError` and the global exception handler. No business rules. |
+| `identity` | The Owner: login, refresh tokens, profile, password, time zone. |
+| `catalog` | Items, categories, prices, stock and images. |
+| `ordering` | Orders, working hours and blocked dates (availability), invoices, dashboard. |
+| `app` | The Spring Boot application: security, CORS, rate limits, request ids, observability config. |
+| `infra/` | Caddy, the backup job, Prometheus, Tempo and Grafana configuration. |
+
+Each module keeps its tables in its own Postgres schema (`identity`, `catalog`, `ordering`) with its own
+migrations in `<module>/src/main/resources/db/migration/<module>/`.
+
+## Run it locally
+
+Needs Docker and JDK 21+ (IntelliJ's bundled JBR works: set `JAVA_HOME` to it).
+
+```bash
+cp .env.example .env                      # once: fill in DB_PASSWORD, APP_OWNER_* (git-ignored)
+docker compose up -d                      # Postgres on localhost:5432
+./mvnw clean install                      # build and run every test (Testcontainers: Docker must be up)
+./mvnw -pl app spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+The API is then on <http://localhost:8080>, with Swagger UI at
+<http://localhost:8080/swagger-ui.html> (OpenAPI JSON at `/v3/api-docs`). On first start the app creates
+the Owner from `APP_OWNER_EMAIL` and `APP_OWNER_INITIAL_PASSWORD`; sign in with those. The `dev` profile
+reads `.env`, allows CORS from `http://localhost:5173` (override with `APP_CORS_ALLOWED_ORIGINS`), and
+generates a throwaway JWT key, so tokens stop working when the app restarts.
+
+Faster checks: `./mvnw -pl app test -Dtest=ModularityTests` (module boundaries, no database) or
+`./mvnw -pl <module> test` for one module.
+
+## Using the API (for the SPA)
+
+Swagger UI is the full reference. The things worth knowing up front:
+
+**Routes.** `/api/public/**` needs no sign-in. `/api/auth/login`, `/api/auth/refresh` and
+`/.well-known/jwks.json` are public too. Everything else under `/api/**` is the Owner's and needs
+`Authorization: Bearer <accessToken>`: a missing or bad token gets 401, the wrong role 403.
+
+| Area | Public | Owner |
+|---|---|---|
+| Catalogue | `GET /api/public/catalogue/items`, `/items/{id}`, `/categories` (available items only) | `/api/catalogue/items/**`, `/api/catalogue/categories/**` |
+| Availability | `GET /api/public/availability?date=` or `?from=&to=` (at most 62 days) | `/api/availability/working-hours/**`, `/api/availability/blocked-dates/**` |
+| Orders | `POST /api/public/orders` (checkout), `GET /api/public/orders/by-token/{token}`, `POST …/by-token/{token}/cancel` | `/api/orders/**`: list and filter, confirm, reject, start-preparation, fulfill, cancel, reschedule, edit lines and notes |
+| Invoices | | `/api/invoices/**`, `/api/orders/{id}/invoice`: discount, pay, refund |
+| Dashboard | | `GET /api/dashboard/summary`, `GET /api/dashboard/production?date=` |
+| Owner | | `/api/auth/me`, `/api/auth/logout`, `/api/owner/profile`, `/api/owner/password` |
+
+**Signing in.** `POST /api/auth/login` with `{"email", "password"}` returns `accessToken` (valid for
+`expiresIn` seconds, 15 minutes), `refreshToken` and `refreshTokenExpiresAt` (14 days). Before the access token
+expires, `POST /api/auth/refresh` with `{"refreshToken"}` returns a new pair. **Each refresh token works
+once:** keep the new one. Sending a used refresh token again counts as theft and signs out every session from
+that login. `POST /api/auth/logout` with `{"refreshToken"}` ends the session.
+
+**Checkout and the magic link.** Read the open slots from `/api/public/availability`. Each day lists `slots`
+with `startTime`, `remainingCapacity` and `bookable`. Slot times are local times in the Owner's time zone
+(`/api/owner/profile`), and `pickupAt` is the matching UTC instant, for example
+`2026-11-21T10:00:00Z` for 10:00 in a UTC bakery. Checkout sends `pickupAt`, `guestContact` (`name`,
+`email`, `phone`), optional `notes` and `lines` (`itemId`, `quantity`). The response's `accessToken` is
+the guest's magic-link token. **It is returned only this once**: put it in the link you show the guest
+(`/api/public/orders/by-token/{token}` reads the order). Unknown or expired tokens get 404.
+
+**Order statuses:** `PENDING` → `CONFIRMED` (or `REJECTED`, with a reason) → `IN_PROGRESS` → `FULFILLED`.
+`CANCELLED` is a customer or system cancellation; pending orders the Owner never answers are cancelled
+after 24 hours. Confirming creates the invoice (`INV-YYYY-NNNN`).
+
+**Errors** always have the same body: `timestamp`, `status`, `error`, `message`, `path`, and for 400s
+`fieldErrors` (`field`, `message`), ready to show next to form fields. 409 means a conflict (a slot just
+filled up, or someone else changed the record first: reload and retry). 429 means rate-limited (login 5 a
+minute, checkout 10 and magic links 30 per 10 minutes per IP). Wait for `Retry-After` seconds.
+
+**Lists** are paginated with `?page=0&size=20&sort=field,desc` (`size` at most 100). The page JSON is
+still Spring Data's default shape (`content`, `totalElements`, `totalPages`, …). It will change to
+`content` + `page{}`, so read it through one helper in the SPA.
+
+**Images.** Items carry `imageUrls` such as `/uploads/items/<uuid>.jpg` and, in the same order,
+`thumbnailUrls` (at most 400 px a side, for lists and cards; the full image is at most 2000 px). They are relative to the API
+origin: in production Caddy serves them, in dev the app does. Upload with
+`POST /api/catalogue/items/{id}/images/upload`, `multipart/form-data` with a `file` part: JPEG, PNG or
+WebP, at most 10 MB and 10 000 px a side. PNGs stay PNG, and JPEG and WebP are stored as JPEG, without EXIF.
+
+**Request ids.** Every response has an `X-Request-Id` header. Show it in error messages, and it leads
+straight to the server's logs and trace (see [Observability](#observability)).
+
+## Deploy
+
+On the server (any Linux host with Docker), from a clone of this repository:
+
+```bash
+cp .env.example .env    # fill in every value; see the comments in the file
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+`.env` must set at least `DB_PASSWORD`, `APP_DOMAIN` (the public host name; Caddy fetches its TLS
+certificate), `APP_CORS_ALLOWED_ORIGINS` (the SPA's origin), `APP_JWT_PRIVATE_KEY` (generate it with the
+command in `.env.example`), `APP_OWNER_EMAIL` and `APP_OWNER_INITIAL_PASSWORD` (first start only; remove the
+password afterwards), and `GRAFANA_ADMIN_PASSWORD`. Generate passwords rather than typing them, for example:
+
+```bash
+grep -q '^GRAFANA_ADMIN_PASSWORD=' .env || echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+```
+
+Only Caddy is reachable from the internet (ports 80 and 443). Grafana listens on the server's loopback
+(3000). The app's management port, Postgres, Prometheus and Tempo stay on the internal Docker network.
+To update, `git pull` and run the same `up -d --build`. Migrations run when the app starts.
+
+To try the whole stack on your own machine, set `APP_DOMAIN=localhost` (Caddy then uses its own local
+certificate, so `curl -k https://localhost/...`).
 
 ## Backups and restore
 
