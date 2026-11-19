@@ -1,6 +1,7 @@
 package com.sugarcrumbs.ordering.web.dto;
 
 import com.sugarcrumbs.ordering.domain.OrderStatus;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -20,10 +21,10 @@ public record GuestOrderResponse(
         List<OrderLineResponse> lines,
         BigDecimal subtotal,
         GuestContactResponse guestContact,
-        String notes,
-        String rejectionReason,
-        String cancellationReason,
+        @Nullable String notes,
+        @Nullable String rejectionReason,
+        @Nullable String cancellationReason,
         Instant placedAt,
-        Instant cancellableUntil
+        @Nullable Instant cancellableUntil
 ) {
 }

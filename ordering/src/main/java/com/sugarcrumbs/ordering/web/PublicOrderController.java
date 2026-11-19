@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -40,6 +41,7 @@ public class PublicOrderController {
 
     /** Places the order and returns it with the guest's magic-link token, the only time it is ever sent. */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ResponseEntity<CheckoutResponse> checkout(@Valid @RequestBody CheckoutRequest request) {
         PlacedOrder placed = orderService.place(request);
         return ResponseEntity.status(HttpStatus.CREATED)

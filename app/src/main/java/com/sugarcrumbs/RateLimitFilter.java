@@ -13,7 +13,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -53,10 +52,9 @@ class RateLimitFilter extends OncePerRequestFilter {
         // The matcher Spring Security uses: it matches the decoded path, so /api/auth/%6Cogin is still login.
         PathPatternRequestMatcher.Builder paths = PathPatternRequestMatcher.withDefaults();
         this.policies = List.of(
-                new Policy("login", paths.matcher(HttpMethod.POST, "/api/auth/login"), properties.login()),
-                new Policy("checkout", paths.matcher(HttpMethod.POST, "/api/public/orders"), properties.checkout()),
-                // Any method: viewing and cancelling share one bucket, so probing for tokens costs the same either way.
-                new Policy("magic-link", paths.matcher("/api/public/orders/by-token/**"), properties.magicLink()));
+                new Policy("login", matcher(paths, ApiRoutes.LOGIN), properties.login()),
+                new Policy("checkout", matcher(paths, ApiRoutes.CHECKOUT), properties.checkout()),
+                new Policy("magic-link", matcher(paths, ApiRoutes.MAGIC_LINK), properties.magicLink()));
         this.resolver = resolver;
 
         // An idle bucket may only be dropped once it would have refilled completely anyway;
@@ -89,6 +87,10 @@ class RateLimitFilter extends OncePerRequestFilter {
         log.info("Rate limit '{}' exceeded", policy.name());
         resolver.resolveException(request, response, null,
                 new TooManyRequestsException(Duration.ofNanos(probe.getNanosToWaitForRefill())));
+    }
+
+    private static RequestMatcher matcher(PathPatternRequestMatcher.Builder paths, ApiRoutes.Route route) {
+        return paths.matcher(route.method(), route.pattern());
     }
 
     private static Bucket newBucket(Limit limit) {

@@ -2,6 +2,7 @@ package com.sugarcrumbs.ordering.web.dto;
 
 import com.sugarcrumbs.ordering.domain.InvoiceStatus;
 import com.sugarcrumbs.ordering.domain.PaymentMethod;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -23,10 +24,10 @@ public record InvoiceResponse(
         BigDecimal subtotal,
         BigDecimal discountAmount,
         BigDecimal total,
-        PaymentMethod paymentMethod,
-        String paymentReference,
-        Instant paidAt,
-        Instant refundedAt,
+        @Nullable PaymentMethod paymentMethod,
+        @Nullable String paymentReference,
+        @Nullable Instant paidAt,
+        @Nullable Instant refundedAt,
         Instant issuedAt
 ) {
 }

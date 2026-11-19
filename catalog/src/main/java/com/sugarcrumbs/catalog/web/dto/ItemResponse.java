@@ -1,5 +1,7 @@
 package com.sugarcrumbs.catalog.web.dto;
 
+import org.jspecify.annotations.Nullable;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -14,12 +16,12 @@ import java.util.UUID;
 public record ItemResponse(
         UUID id,
         String name,
-        String description,
+        @Nullable String description,
         BigDecimal price,
         CategoryResponse category,
         boolean available,
         int leadTimeHours,
-        Integer stockQuantity,
+        @Nullable Integer stockQuantity,
         boolean orderable,
         List<String> imageUrls,
         List<String> thumbnailUrls,

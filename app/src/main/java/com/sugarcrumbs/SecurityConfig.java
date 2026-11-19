@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -22,7 +21,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * {@code ROLE_OWNER} (issued by the identity module's {@code /api/auth/login}),
  * validated by identity's {@code JwtDecoder} bean.
  *
- * <p>Default deny: anything not listed as public needs the Owner. The shopper
+ * <p>Default deny: anything not listed as public ({@link ApiRoutes#PUBLIC}) needs the Owner. The shopper
  * surface lives under {@code /api/public/**}: read-only, except guest checkout
  * ({@code POST /api/public/orders}), which is validated and rate-limited
  * ({@link RateLimitFilter}). CORS comes from {@link WebEdgeConfig}.
@@ -58,23 +57,12 @@ class SecurityConfig {
                 .anonymous(Customizer.withDefaults())
                 // Uses WebEdgeConfig's CorsConfigurationSource; answers preflights before authorization.
                 .cors(Customizer.withDefaults())
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/.well-known/jwks.json").permitAll()
-                        // The shopper surface: public reads, and guest checkout as its only write.
-                        .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/public/orders").permitAll()
-                        // The guest's own order: the magic-link token in the path is the credential.
-                        .requestMatchers(HttpMethod.POST, "/api/public/orders/by-token/*/cancel").permitAll()
-                        // Image files (Caddy serves them directly in prod) and API docs.
-                        .requestMatchers(HttpMethod.GET, "/uploads/**", "/v3/api-docs/**", "/swagger-ui/**",
-                                "/swagger-ui.html").permitAll()
-                        // Actuator only listens on the internal management port (never proxied), and
-                        // exposes only health and info there.
-                        .requestMatchers("/actuator/**").permitAll()
-                        // Error dispatches carry the original request's status and ApiError body.
-                        .requestMatchers("/error").permitAll()
-                        .anyRequest().hasRole("OWNER"))
+                .authorizeHttpRequests(auth -> {
+                    // The public routes, with why each one is public, are listed in ApiRoutes, which the
+                    // OpenAPI spec reads too.
+                    ApiRoutes.PUBLIC.forEach(route -> auth.requestMatchers(route.method(), route.pattern()).permitAll());
+                    auth.anyRequest().hasRole("OWNER");
+                })
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(ownerRolesConverter()))
                         .authenticationEntryPoint(unauthorized)

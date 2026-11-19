@@ -17,7 +17,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -26,7 +25,6 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Central place every controller's exceptions funnel through, so every
@@ -128,7 +126,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(
             MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
-        List<Map<String, String>> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
+        List<ApiError.FieldError> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
                 .map(GlobalExceptionHandler::toFieldError)
                 .toList();
         ApiError body = ApiError.withFieldErrors(
@@ -151,8 +149,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.status(statusCode).headers(headers).body(apiError);
     }
 
-    private static Map<String, String> toFieldError(FieldError fieldError) {
-        return Map.of("field", fieldError.getField(), "message", String.valueOf(fieldError.getDefaultMessage()));
+    private static ApiError.FieldError toFieldError(org.springframework.validation.FieldError fieldError) {
+        return new ApiError.FieldError(fieldError.getField(), String.valueOf(fieldError.getDefaultMessage()));
     }
 
     private static ResponseEntity<ApiError> build(HttpStatus status, String message, HttpServletRequest request) {
