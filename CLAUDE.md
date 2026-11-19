@@ -238,8 +238,14 @@ distributed locking, which is more complexity than a single baker needs.
   module calls in-process now and service-to-service calls after the split. `spring-modulith-starter-insight`
   adds per-module spans. Every request is sampled; the OTLP endpoint is only set in `docker-compose.prod.yml`.
 - `RequestIdFilter` (in `app`) gives each request an `X-Request-Id` (a plausible incoming one is kept), puts it in
-  the MDC as `requestId` and on the span as `request.id`. `ObservabilityConfig` drops security observations
-  that have no parent, so management-port traffic (health checks, scrapes) makes no traces.
+  the MDC as `requestId` and on the span as `request.id`.
+- JDBC calls are traced with `datasource-micrometer-spring-boot`: a `connection` span and a `query` span per
+  statement (`jdbc.includes=connection,query`), so Postgres shows as `baker-db` (the datasource name) in the
+  service graph, and `jdbc_query_seconds` / `jdbc_connection_*` metrics are exported. Query text uses `?`
+  placeholders; never turn on `jdbc.datasource-proxy.include-parameter-values` (spans would carry guests' details).
+- `ObservabilityConfig` drops security and JDBC observations with no (recorded) parent, so management-port
+  traffic (health checks, scrapes, the `baker_orders_pending` query) and startup queries make no traces.
+  `TracingTests` guards this.
 - **Prometheus** scrapes `/actuator/prometheus` on each management port. **Tempo** receives OTLP traces, and
   Grafana's service graph shows gateway → service → service calls.
 - **Grafana** datasources and dashboards are **provisioned from files** in `infra/grafana/`. Don't configure

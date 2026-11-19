@@ -61,6 +61,7 @@ class TracingTests extends AbstractIntegrationTest {
         recorder.recording = false;
     }
 
+    /** A scrape reads baker_orders_pending from the database: that query is not a trace either. */
     @Test
     void healthChecksAndScrapesOnTheManagementPortAreNotTraced() throws Exception {
         get(managementPort, "/actuator/health");
@@ -70,14 +71,31 @@ class TracingTests extends AbstractIntegrationTest {
     }
 
     @Test
-    void anApiRequestIsOneTraceWithItsSecurityStepsInside() throws Exception {
+    void anApiRequestIsOneTraceWithItsSecurityStepsAndDatabaseCallsInside() throws Exception {
         get(appPort, "/api/public/catalogue/items");
 
         List<Observation.Context> roots = recorder.started.stream()
                 .filter(context -> context.getParentObservation() == null).toList();
         assertThat(roots).extracting(Observation.Context::getName).containsExactly("http.server.requests");
         assertThat(recorder.started).extracting(Observation.Context::getName)
-                .anyMatch(name -> name.startsWith("spring.security."));
+                .anyMatch(name -> name.startsWith("spring.security."))
+                .contains("jdbc.connection", "jdbc.query")
+                .as("no span per ResultSet row (jdbc.includes)").doesNotContain("jdbc.result-set");
+    }
+
+    /** Spans travel to Tempo and are kept for a week: a guest's details must never be in one. */
+    @Test
+    void databaseSpansCarryTheQueryButNeverItsParameterValues() throws Exception {
+        String marker = "trace-secret-" + System.nanoTime();
+        get(appPort, "/api/public/catalogue/items?search=" + marker);
+
+        List<Observation.Context> queries = recorder.started.stream()
+                .filter(context -> context.getName().equals("jdbc.query")).toList();
+        assertThat(queries).isNotEmpty();
+        assertThat(queries).allSatisfy(context -> {
+            String keyValues = context.getAllKeyValues().toString();
+            assertThat(keyValues).contains("select").doesNotContain(marker);
+        });
     }
 
     private void get(int port, String path) throws Exception {

@@ -70,6 +70,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-opentelemetry</artifactId>
         </dependency>
+        <!-- A span for every JDBC connection and query (OpenTelemetry database conventions), so database time
+             shows inside each request's trace and Postgres appears in the service graph. -->
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+            <version>${datasource-micrometer.version}</version>
+        </dependency>
         <!-- Module observability; its actuator endpoint is not in management.endpoints.web.exposure.include. -->
         <dependency>
             <groupId>org.springframework.modulith</groupId>
