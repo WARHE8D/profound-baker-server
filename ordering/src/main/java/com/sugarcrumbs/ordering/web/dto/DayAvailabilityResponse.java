@@ -1,5 +1,7 @@
 package com.sugarcrumbs.ordering.web.dto;
 
+import org.jspecify.annotations.Nullable;
+
 import java.time.LocalDate;
 import java.util.List;
 
@@ -12,7 +14,7 @@ import java.util.List;
 public record DayAvailabilityResponse(
         LocalDate date,
         boolean open,
-        String reason,
+        @Nullable String reason,
         List<TimeSlotResponse> slots
 ) {
     public static DayAvailabilityResponse closed(LocalDate date, String reason) {

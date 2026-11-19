@@ -6,6 +6,7 @@ import com.sugarcrumbs.ordering.web.dto.BlockedDateRequest;
 import com.sugarcrumbs.ordering.web.dto.BlockedDateResponse;
 import com.sugarcrumbs.ordering.web.mapper.BlockedDateMapper;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -35,6 +37,7 @@ public class BlockedDateController {
     }
 
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     public ResponseEntity<BlockedDateResponse> create(@Valid @RequestBody BlockedDateRequest request,
                                                       UriComponentsBuilder uriBuilder) {
         BlockedDate created = blockedDateService.create(request);
@@ -55,6 +58,7 @@ public class BlockedDateController {
     }
 
     @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         blockedDateService.delete(id);
         return ResponseEntity.noContent().build();

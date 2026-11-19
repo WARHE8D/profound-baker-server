@@ -1,5 +1,7 @@
 package com.sugarcrumbs.ordering.web.dto;
 
+import org.jspecify.annotations.Nullable;
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -19,6 +21,6 @@ public record ProductionListResponse(LocalDate date, long orderCount, List<Produ
      * @param itemName   the catalog's current name, or the name the orders recorded if it is gone
      * @param orderCount how many of the day's orders include it
      */
-    public record ProductionItemResponse(UUID itemId, String itemName, long quantity, long orderCount) {
+    public record ProductionItemResponse(@Nullable UUID itemId, String itemName, long quantity, long orderCount) {
     }
 }

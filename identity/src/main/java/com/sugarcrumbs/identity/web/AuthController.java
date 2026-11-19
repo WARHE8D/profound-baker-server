@@ -10,6 +10,7 @@ import com.sugarcrumbs.identity.web.dto.RefreshRequest;
 import com.sugarcrumbs.identity.web.dto.TokenResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
@@ -49,6 +51,7 @@ public class AuthController {
 
     /** Revokes the session the refresh token belongs to. Owner only. */
     @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     public ResponseEntity<Void> logout(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody RefreshRequest request) {
         authService.logout(ownerId(jwt), request.refreshToken());
         return ResponseEntity.noContent().build();
