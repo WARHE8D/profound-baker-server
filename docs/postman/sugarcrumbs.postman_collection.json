@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "SugarCrumbs API (local)",
-    "description": "Local API for the SugarCrumbs baker backend (modular monolith).\n\n**Auth:** run *Auth \u2192 Log in* first (set `ownerEmail`/`ownerPassword` to your `APP_OWNER_EMAIL`/`APP_OWNER_INITIAL_PASSWORD`). Owner routes need the saved Bearer token; shopper routes live under `/api/public/**` and need none. Login is rate-limited to 5 per minute per IP, guest checkout to 10 per 10 minutes.\n\n**Suggested order:** Auth \u2192 Log in; Catalogue \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Orders \u2192 Guest checkout \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, orderId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Pickup times (`slotAt`, `rescheduleAt`) are picked from live availability, so the run can be repeated. Each run leaves its category, ordered item and orders in the DB: ordered items can't be deleted until #14.",
+    "description": "Local API for the SugarCrumbs baker backend (modular monolith).\n\n**Auth:** run *Auth \u2192 Log in* first (set `ownerEmail`/`ownerPassword` to your `APP_OWNER_EMAIL`/`APP_OWNER_INITIAL_PASSWORD`). Owner routes need the saved Bearer token; shopper routes live under `/api/public/**` and need none. Login is rate-limited to 5 per minute per IP, guest checkout to 10 per 10 minutes.\n\n**Suggested order:** Auth \u2192 Log in; Catalogue \u2192 Create category \u2192 Create item; Availability \u2192 set working hours; Orders \u2192 Guest checkout \u2192 Accept / Reject.\n\nIds from create requests are saved automatically into collection variables (categoryId, itemId, orderId, blockedDateId). Dates (`tomorrow`, `dayAfterTomorrow`, `nextWeek`, `tzOffset`) are recomputed before every request. Pickup times (`slotAt`, `rescheduleAt`) are the `startsAt` of a bookable slot from live availability, so the run can be repeated and works whatever the bakery's time zone. Each run leaves its category, ordered item and orders in the DB: ordered items can't be deleted until #14.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -17,7 +17,7 @@
           "pm.collectionVariables.set('tomorrow', ymd(plusDays(1)));",
           "pm.collectionVariables.set('dayAfterTomorrow', ymd(plusDays(2)));",
           "pm.collectionVariables.set('nextWeek', ymd(plusDays(7)));",
-          "// The server reads order times in its own zone (same machine), so send the local offset.",
+          "// The owner order list's from/to are instants; send this machine's offset so they mean local midnight.",
           "const off = -new Date().getTimezoneOffset();",
           "pm.collectionVariables.set('tzOffset', `${off >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`);"
         ]
@@ -934,6 +934,41 @@
       "description": "What shoppers see: no token, only available items, no stock counts.",
       "item": [
         {
+          "name": "Bakery details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has the time zone pickup slots are in', () => pm.expect(pm.response.json().timeZone).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/public/bakery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "bakery"
+              ]
+            },
+            "description": "Business name, time zone, logo, phone and address for the storefront. Never the Owner's email or id."
+          },
+          "response": []
+        },
+        {
           "name": "Browse items",
           "request": {
             "auth": {
@@ -1038,7 +1073,11 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status is 200', () => pm.response.to.have.status(200));"
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('slots carry their UTC instants', () => pm.response.json().forEach(day => day.slots.forEach(s => {",
+                  "    pm.expect(s.startsAt).to.match(/Z$/);",
+                  "    pm.expect(s.endsAt).to.match(/Z$/);",
+                  "})));"
                 ]
               }
             }
@@ -1063,7 +1102,7 @@
                 }
               ]
             },
-            "description": "Always returns a list of days."
+            "description": "Always returns a list of days. Each slot has local startTime/endTime for display and startsAt/endsAt (UTC) to send as pickupAt."
           }
         },
         {
@@ -1440,7 +1479,8 @@
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
                   "        if (slot) {",
-                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            // The slot's own UTC instant: no zone conversion here, whatever the bakery's zone.",
+                  "            pm.collectionVariables.set('slotAt', slot.startsAt);",
                   "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
                   "            return;",
                   "        }",
@@ -1978,7 +2018,8 @@
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
                   "        if (slot) {",
-                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            // The slot's own UTC instant: no zone conversion here, whatever the bakery's zone.",
+                  "            pm.collectionVariables.set('slotAt', slot.startsAt);",
                   "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
                   "            return;",
                   "        }",
@@ -2049,7 +2090,8 @@
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
                   "        if (slot) {",
-                  "            pm.collectionVariables.set('rescheduleAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            // The slot's own UTC instant: no zone conversion here, whatever the bakery's zone.",
+                  "            pm.collectionVariables.set('rescheduleAt', slot.startsAt);",
                   "            console.log('rescheduleAt =', pm.collectionVariables.get('rescheduleAt'));",
                   "            return;",
                   "        }",
@@ -2282,7 +2324,8 @@
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
                   "        if (slot) {",
-                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            // The slot's own UTC instant: no zone conversion here, whatever the bakery's zone.",
+                  "            pm.collectionVariables.set('slotAt', slot.startsAt);",
                   "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
                   "            return;",
                   "        }",
@@ -2399,7 +2442,8 @@
                   "    for (const day of res.json()) {",
                   "        const slot = (day.slots || []).find(s => s.bookable);",
                   "        if (slot) {",
-                  "            pm.collectionVariables.set('slotAt', `${day.date}T${slot.startTime}${v('tzOffset')}`);",
+                  "            // The slot's own UTC instant: no zone conversion here, whatever the bakery's zone.",
+                  "            pm.collectionVariables.set('slotAt', slot.startsAt);",
                   "            console.log('slotAt =', pm.collectionVariables.get('slotAt'));",
                   "            return;",
                   "        }",

@@ -99,6 +99,26 @@ class OwnerProfileApiTests extends AbstractIntegrationTest {
         assertThat(ownerApi.settings().timeZone()).isEqualTo(ZoneId.of("Europe/London"));
     }
 
+    /** Guests read the storefront's details and time zone without a token, and never the Owner's own. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void thePublicBakeryShowsTheProfileWithoutPersonalDetails() {
+        Map<String, Object> request = profile("America/New_York");
+        request.put("logoUrl", "/uploads/logo.png");
+        request.put("address", Map.of("city", "Brooklyn"));
+        put(request);
+
+        ResponseEntity<Map> response = http.get().uri("/api/public/bakery").retrieve().toEntity(Map.class);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).containsOnlyKeys("businessName", "timeZone", "logoUrl", "phone", "address")
+                .containsEntry("businessName", "Crumbs & Co")
+                .containsEntry("timeZone", "America/New_York")
+                .containsEntry("logoUrl", "/uploads/logo.png")
+                .containsEntry("phone", null);
+        assertThat((Map<String, Object>) response.getBody().get("address")).containsEntry("city", "Brooklyn");
+    }
+
     @Test
     void anOmittedAddressIsCleared() {
         Map<String, Object> withAddress = profile("UTC");

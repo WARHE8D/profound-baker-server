@@ -4,6 +4,7 @@ import com.sugarcrumbs.identity.domain.Address;
 import com.sugarcrumbs.identity.domain.Owner;
 import com.sugarcrumbs.identity.web.dto.AddressDto;
 import com.sugarcrumbs.identity.web.dto.OwnerProfileResponse;
+import com.sugarcrumbs.identity.web.dto.PublicBakeryResponse;
 import org.mapstruct.Mapper;
 
 import java.time.ZoneId;
@@ -12,6 +13,8 @@ import java.time.ZoneId;
 public interface OwnerMapper {
 
     OwnerProfileResponse toProfileResponse(Owner owner);
+
+    PublicBakeryResponse toPublicBakeryResponse(Owner owner);
 
     AddressDto toDto(Address address);
 
