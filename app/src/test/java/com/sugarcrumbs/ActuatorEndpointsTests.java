@@ -121,7 +121,7 @@ class ActuatorEndpointsTests extends AbstractIntegrationTest {
 
         Path infra = repoRoot().resolve("infra");
         Pattern appMetric = Pattern.compile(
-                "\\b((?:baker|http_server_requests|jvm|process|system|hikaricp)_[a-z0-9_]+)\\b");
+                "\\b((?:baker|http_server_requests|jvm|process|system|hikaricp|jdbc)_[a-z0-9_]+)\\b");
         List<Path> files = new ArrayList<>(List.of(infra.resolve("prometheus/alerts.yml")));
         try (Stream<Path> dashboards = Files.list(infra.resolve("grafana/dashboards"))) {
             dashboards.forEach(files::add);

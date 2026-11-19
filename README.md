@@ -86,9 +86,9 @@ The production stack also runs Prometheus, Tempo and Grafana (#26). Their config
 | What | Where it comes from |
 |---|---|
 | Metrics | Prometheus scrapes the app's `/actuator/prometheus` on the internal management port (9080) every 15s, and the backup job's last-success time from `backup:9101`. Kept `PROMETHEUS_RETENTION` (default 30 days). |
-| Traces | The app sends every request's trace to Tempo over OTLP. Kept 7 days. Tempo turns them into the service graph and request metrics. |
+| Traces | The app sends every request's trace to Tempo over OTLP, with a span for each database connection and query (SQL with `?` placeholders, never the values). Kept 7 days. Tempo turns them into the service graph (`user → baker → baker-db`) and request metrics. |
 | Logs | One JSON object per line on the app container's stdout (`docker compose -f docker-compose.prod.yml logs app`), with `traceId`, `spanId` and `requestId` fields. |
-| Dashboards | Grafana, folder *SugarCrumbs*: **Service overview** (traffic, 4xx/5xx by route, p50/p95/p99 latency, JVM, database pool) and **Business** (orders by status, pending backlog, auto-cancelled orders, revenue, failed logins, last backup). |
+| Dashboards | Grafana, folder *SugarCrumbs*: **Service overview** (traffic, 4xx/5xx by route, p50/p95/p99 latency, JVM, database pool, queries and query time) and **Business** (orders by status, pending backlog, auto-cancelled orders, revenue, failed logins, last backup). |
 | Alerts | `infra/prometheus/alerts.yml`: a service down, 5xx rate over 5%, a growing pending backlog, auto-cancelled orders, a burst of failed logins, a stale or failed backup. They show in Grafana under *Alerting*. Nothing sends them anywhere yet: that needs an Alertmanager. |
 
 **Open Grafana.** It listens on the server's loopback only, never on the internet. Tunnel to it, then

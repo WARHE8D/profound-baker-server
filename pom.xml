@@ -43,6 +43,7 @@
         <spring-modulith.version>2.1.2</spring-modulith.version>
         <bucket4j.version>8.21.0</bucket4j.version>
         <twelvemonkeys.version>3.15.3</twelvemonkeys.version>
+        <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
     </properties>
 
     <dependencyManagement>
