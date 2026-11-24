@@ -110,13 +110,19 @@ docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 `.env` must set at least `DB_PASSWORD`, `APP_DOMAIN` (the public host name; Caddy fetches its TLS
-certificate), `APP_CORS_ALLOWED_ORIGINS` (the SPA's origin), `APP_JWT_PRIVATE_KEY` (generate it with the
+certificate), `APP_CORS_ALLOWED_ORIGINS` (`https://<APP_DOMAIN>`: the SPA is served from the same domain), `APP_JWT_PRIVATE_KEY` (generate it with the
 command in `.env.example`), `APP_OWNER_EMAIL` and `APP_OWNER_INITIAL_PASSWORD` (first start only; remove the
 password afterwards), and `GRAFANA_ADMIN_PASSWORD`. Generate passwords rather than typing them, for example:
 
 ```bash
 grep -q '^GRAFANA_ADMIN_PASSWORD=' .env || echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
 ```
+
+The stack includes the web app: the `web` service runs the image
+[profound-baker-web](https://github.com/WARHE8D/profound-baker-web) publishes to GHCR on every merge to its
+`main`. Caddy sends `/api/*`, `/.well-known/*` and the OpenAPI docs to the app, `/uploads/*` to the files,
+and everything else to `web`. To update only the web app:
+`docker compose -f docker-compose.prod.yml pull web && docker compose -f docker-compose.prod.yml up -d web`.
 
 Only Caddy is reachable from the internet (ports 80 and 443). Grafana listens on the server's loopback
 (3000). The app's management port, Postgres, Prometheus and Tempo stay on the internal Docker network.

@@ -1,5 +1,5 @@
-# Production stack for the single VPS: Caddy (TLS, reverse proxy) -> app -> Postgres, plus nightly backups
-# and observability (Prometheus, Tempo, Grafana; #26).
+# Production stack for the single VPS: Caddy (TLS, reverse proxy) -> app -> Postgres and the web app (SPA),
+# plus nightly backups and observability (Prometheus, Tempo, Grafana; #26).
 #   docker compose -f docker-compose.prod.yml up -d --build
 # Values come from .env next to this file (copy .env.example). Only Caddy publishes ports to the internet;
 # Grafana is published on the server's loopback only (an SSH tunnel away, see README.md "Observability"),
@@ -50,11 +50,25 @@ services:
       - uploads:/data/uploads
     # Health check is defined in the Dockerfile (Actuator readiness on the internal port 9080).
 
+  # The SPA, built and published by profound-baker-web (its Dockerfile): static files behind Caddy below,
+  # on the same domain as the API. Update with `docker compose -f docker-compose.prod.yml pull web` and
+  # `up -d web`; WEB_IMAGE_TAG pins a version (a commit SHA) instead of the latest build of main.
+  web:
+    image: ghcr.io/warhe8d/profound-baker-web:${WEB_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+    # Health check is defined in its Dockerfile.
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       app:
+        condition: service_healthy
+      web:
         condition: service_healthy
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env}
