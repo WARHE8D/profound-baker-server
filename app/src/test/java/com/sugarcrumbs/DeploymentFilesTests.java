@@ -320,9 +320,10 @@ class DeploymentFilesTests {
         String envE2e = Files.readString(REPO_ROOT.resolve(".env.e2e"));
         Pattern variable = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)");
 
-        assertThat(envE2e).contains("APP_OWNER_EMAIL=owner@e2e.test\n")
-                .contains("APP_OWNER_INITIAL_PASSWORD=e2e-owner-password\n")
-                .contains("APP_OWNER_TIME_ZONE=America/New_York\n");
+        // \r?: a Windows checkout may give the file CRLF line endings.
+        assertThat(envE2e).containsPattern("(?m)^APP_OWNER_EMAIL=owner@e2e\\.test\\r?$")
+                .containsPattern("(?m)^APP_OWNER_INITIAL_PASSWORD=e2e-owner-password\\r?$")
+                .containsPattern("(?m)^APP_OWNER_TIME_ZONE=America/New_York\\r?$");
         Set<String> names = variable.matcher(rawE2e()).results().map(m -> m.group(1)).collect(Collectors.toSet());
         assertThat(names).isNotEmpty().allSatisfy(name ->
                 assertThat(envE2e).as("%s in .env.e2e", name).containsPattern("(?m)^#?\\s*" + name + "="));
