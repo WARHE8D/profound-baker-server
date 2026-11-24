@@ -1,0 +1,107 @@
+# The stack profound-baker-web's end-to-end tests run against: the production stack (docker-compose.prod.yml)
+# with this file on top, filled with a copy of production's data. Never production itself: the tests
+# rewrite the bakery's profile and working hours, add items and place orders.
+#   docker compose -f docker-compose.prod.yml -f docker-compose.e2e.yml --env-file .env.e2e up -d --build --wait
+# Add `-f docker-compose.e2e-web.yml` with WEB_DIR=<profound-baker-web checkout> to test an unpublished web build.
+#
+# The data is the newest baker-*.dump (and its uploads archive) in E2E_BACKUP_DIR, default ./backups, or the
+# one E2E_DUMP names; with none, the bakery starts empty. Every `up` restores it afresh: the database lives
+# in memory. See README.md, "End-to-end stack for the web app".
+#
+#   http://localhost:8080  the API, for the SPA served by `vite preview` on :4173
+#   http://localhost:8081  the site as deployed: web + API behind the production Caddyfile, on plain HTTP
+
+# Own project name: separate containers, network and volumes, so it never touches sugarcrumbs-prod.
+name: sugarcrumbs-e2e
+
+services:
+
+  postgres:
+    restart: "no"
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      interval: 2s
+      retries: 30
+
+  # One-shot: the copy of production, then the Owner handed to the tests (infra/e2e/restore.sh).
+  db-restore:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "/restore.sh", "db"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${DB_NAME:?Set DB_NAME in .env.e2e}
+      PGUSER: ${DB_USERNAME:?Set DB_USERNAME in .env.e2e}
+      PGPASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env.e2e}
+      E2E_DUMP: ${E2E_DUMP:-}
+      E2E_OWNER_EMAIL: ${APP_OWNER_EMAIL:?Set APP_OWNER_EMAIL in .env.e2e}
+      E2E_OWNER_PASSWORD: ${APP_OWNER_INITIAL_PASSWORD:?Set APP_OWNER_INITIAL_PASSWORD in .env.e2e}
+    volumes:
+      - ./infra/e2e/restore.sh:/restore.sh:ro
+      - ${E2E_BACKUP_DIR:-./backups}:/backups:ro
+
+  # One-shot: the dump's images. Runs in the app's image, as the app's user, so the volume and its files
+  # belong to the app (it deletes images it no longer uses). Built by `app` below, never pulled.
+  uploads-restore:
+    image: sugarcrumbs/baker:e2e
+    pull_policy: never
+    entrypoint: ["sh", "/restore.sh", "uploads"]
+    environment:
+      E2E_DUMP: ${E2E_DUMP:-}
+    volumes:
+      - ./infra/e2e/restore.sh:/restore.sh:ro
+      - ${E2E_BACKUP_DIR:-./backups}:/backups:ro
+      - uploads:/data/uploads
+
+  app:
+    # Its own tag: building here must not replace the image production runs.
+    image: sugarcrumbs/baker:e2e
+    restart: "no"
+    depends_on:
+      db-restore:
+        condition: service_completed_successfully
+      uploads-restore:
+        condition: service_completed_successfully
+    environment:
+      # Not `prod`: no fixed JWT key is needed (a throwaway one is made at startup).
+      SPRING_PROFILES_ACTIVE: e2e
+      # The built SPA on `vite preview`, and the single origin on :8081.
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:4173,http://localhost:8081
+      # Every test signs in or checks out from the same address: lift the per-IP limits.
+      APP_RATE_LIMIT_LOGIN_CAPACITY: 1000
+      APP_RATE_LIMIT_CHECKOUT_CAPACITY: 1000
+      APP_RATE_LIMIT_MAGIC_LINK_CAPACITY: 1000
+      # No Tempo here: spans are made but not sent anywhere.
+      MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: !reset null
+    ports:
+      - "8080:8080"
+
+  web:
+    restart: "no"
+
+  # The production Caddyfile on plain HTTP: a site address with a scheme and port turns automatic HTTPS off.
+  caddy:
+    restart: "no"
+    environment:
+      APP_DOMAIN: http://localhost:8081
+    ports: !override
+      - "8081:8081"
+    volumes: !override
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - uploads:/srv/uploads:ro
+
+  # Production only: nightly backups and observability. Never started by this stack.
+  backup:
+    profiles: [prod-only]
+  prometheus:
+    profiles: [prod-only]
+  tempo-init:
+    profiles: [prod-only]
+  tempo:
+    profiles: [prod-only]
+  grafana:
+    profiles: [prod-only]
