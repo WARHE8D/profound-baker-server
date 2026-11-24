@@ -42,3 +42,34 @@ jobs:
           name: test-reports
           path: '**/target/surefire-reports/'
           retention-days: 7
+
+  # The stack profound-baker-web's e2e tests run against (docker-compose.e2e.yml on top of the production
+  # file), started empty: a change to either compose file that breaks it fails here.
+  e2e-stack:
+    name: e2e stack starts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      E2E: docker compose -f docker-compose.prod.yml -f docker-compose.e2e.yml --env-file .env.e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Start the stack
+        run: $E2E up -d --build --wait --wait-timeout 300
+
+      - name: Sign in as the e2e Owner, through the API and through Caddy
+        run: |
+          for base in http://localhost:8080 http://localhost:8081; do
+            curl -fsS -o /dev/null -X POST "$base/api/auth/login" -H 'Content-Type: application/json' \
+              -d '{"email":"owner@e2e.test","password":"e2e-owner-password"}'
+          done
+          curl -fsS -o /dev/null http://localhost:8081/
+
+      - name: Logs
+        if: failure()
+        run: $E2E logs --no-color
+
+      - name: Stop
+        if: always()
+        run: $E2E down -v

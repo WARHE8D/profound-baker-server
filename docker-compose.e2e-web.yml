@@ -1,0 +1,11 @@
+# Optional third file for the end-to-end stack: build the web app from a profound-baker-web checkout
+# instead of running its published image.
+#   WEB_DIR=../profound-baker-web docker compose -f docker-compose.prod.yml -f docker-compose.e2e.yml \
+#       -f docker-compose.e2e-web.yml --env-file .env.e2e up -d --build --wait
+# A separate file because compose has no conditional `build`.
+
+services:
+  web:
+    build: ${WEB_DIR:?Set WEB_DIR to a profound-baker-web checkout}
+    # Its own tag, so it never replaces the published image production pulls.
+    image: sugarcrumbs/web:e2e

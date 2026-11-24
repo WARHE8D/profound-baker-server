@@ -234,6 +234,113 @@ class DeploymentFilesTests {
         }
     }
 
+    // ---- The end-to-end stack (#58): docker-compose.e2e.yml on top of the production file ----
+
+    /**
+     * A copy of production beside production, sharing nothing with it: its own project (containers,
+     * network, volumes), a database in memory, and an app image under another tag, so building it never
+     * replaces the image production runs.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void e2eStackSharesNoStateWithProduction() throws IOException {
+        Map<String, Object> prod = compose("docker-compose.prod.yml");
+        Map<String, Object> e2e = compose("docker-compose.e2e.yml");
+        Map<String, Map<String, Object>> services = (Map<String, Map<String, Object>>) e2e.get("services");
+
+        assertThat(e2e.get("name")).isEqualTo("sugarcrumbs-e2e").isNotEqualTo(prod.get("name"));
+        assertThat(rawE2e()).containsPattern("(?m)^  postgres:\\n(    .*\\n)*?    volumes: !reset \\[]");
+        assertThat((List<Object>) services.get("postgres").get("tmpfs")).containsExactly("/var/lib/postgresql");
+        assertThat(services.get("app").get("image")).isEqualTo("sugarcrumbs/baker:e2e")
+                .isNotEqualTo(services("docker-compose.prod.yml").get("app").get("image"));
+        assertThat(services.get("uploads-restore")).containsEntry("image", "sugarcrumbs/baker:e2e")
+                .containsEntry("pull_policy", "never");
+        assertThat(compose("docker-compose.e2e-web.yml").toString()).contains("image=sugarcrumbs/web:e2e");
+    }
+
+    /** Ports replace production's (!override), so the e2e stack never binds 80/443 next to production. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void e2eStackPublishesOnlyTheApiAndTheSiteOnLocalPorts() throws IOException {
+        Map<String, Map<String, Object>> services = e2eServices();
+
+        assertThat(rawE2e()).contains("    ports: !override\n      - \"8081:8081\"")
+                .contains("    volumes: !override\n      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro");
+        assertThat((List<Object>) services.get("caddy").get("volumes")).doesNotContain("caddy_data:/data");
+        assertThat((Map<String, Object>) services.get("caddy").get("environment"))
+                .containsEntry("APP_DOMAIN", "http://localhost:8081");
+        assertThat((List<Object>) services.get("app").get("ports")).containsExactly("8080:8080");
+        services.forEach((name, service) -> {
+            if (!name.equals("caddy") && !name.equals("app")) {
+                assertThat(service).as(name + " publishes no ports").doesNotContainKey("ports");
+            }
+        });
+    }
+
+    /**
+     * Every production service needs a decision here: run in the e2e stack, or kept out of it. A new
+     * production service (another job writing to the database or sending data somewhere) fails this until
+     * someone decides.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void e2eStackRunsOnlyTheSiteAndKeepsProductionJobsOut() throws IOException {
+        Map<String, Map<String, Object>> e2e = e2eServices();
+        Set<String> runs = Set.of("postgres", "app", "web", "caddy");
+
+        assertThat(services("docker-compose.prod.yml").keySet()).allSatisfy(name -> {
+            if (!runs.contains(name)) {
+                assertThat(e2e.get(name)).as(name + " is kept out of the e2e stack").isNotNull();
+                assertThat((List<Object>) e2e.get(name).get("profiles")).as(name).containsExactly("prod-only");
+            }
+        });
+        assertThat((Map<String, Object>) e2e.get("app").get("depends_on"))
+                .containsKeys("db-restore", "uploads-restore");
+    }
+
+    /** Not the prod profile, no traces sent anywhere, and the per-IP limits lifted for the tests. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void e2eAppRunsTheE2eProfileWithoutTempo() throws IOException {
+        Map<String, Object> environment = (Map<String, Object>) e2eServices().get("app").get("environment");
+
+        assertThat(environment).containsEntry("SPRING_PROFILES_ACTIVE", "e2e")
+                .containsEntry("APP_CORS_ALLOWED_ORIGINS", "http://localhost:4173,http://localhost:8081")
+                .containsKeys("APP_RATE_LIMIT_LOGIN_CAPACITY", "APP_RATE_LIMIT_CHECKOUT_CAPACITY",
+                        "APP_RATE_LIMIT_MAGIC_LINK_CAPACITY");
+        assertThat(rawE2e()).contains("MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: !reset null");
+    }
+
+    /**
+     * .env.e2e is committed (test-only values) and documents every variable the e2e files read; its Owner
+     * is the one profound-baker-web's e2e/support/env.ts signs in as.
+     */
+    @Test
+    void e2eValuesAreCommittedDocumentedAndMatchTheWebTests() throws IOException {
+        String envE2e = Files.readString(REPO_ROOT.resolve(".env.e2e"));
+        Pattern variable = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)");
+
+        assertThat(envE2e).contains("APP_OWNER_EMAIL=owner@e2e.test\n")
+                .contains("APP_OWNER_INITIAL_PASSWORD=e2e-owner-password\n")
+                .contains("APP_OWNER_TIME_ZONE=America/New_York\n");
+        Set<String> names = variable.matcher(rawE2e()).results().map(m -> m.group(1)).collect(Collectors.toSet());
+        assertThat(names).isNotEmpty().allSatisfy(name ->
+                assertThat(envE2e).as("%s in .env.e2e", name).containsPattern("(?m)^#?\\s*" + name + "="));
+        assertThat(Files.readAllLines(REPO_ROOT.resolve(".gitignore"))).doesNotContain(".env*", ".env.e2e");
+        assertThat(Files.readString(REPO_ROOT.resolve("infra/e2e/restore.sh")))
+                .startsWith("#!/bin/sh\n").doesNotContain("\r");
+    }
+
+    /** The e2e file with its compose merge tags (!reset, !override) removed, as plain YAML. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Object>> e2eServices() throws IOException {
+        return (Map<String, Map<String, Object>>) compose("docker-compose.e2e.yml").get("services");
+    }
+
+    private static String rawE2e() throws IOException {
+        return Files.readString(REPO_ROOT.resolve("docker-compose.e2e.yml"));
+    }
+
     /** The Caddyfile without its comment lines, so prose never satisfies or breaks a check. */
     private static String caddyDirectives() throws IOException {
         return Files.readAllLines(REPO_ROOT.resolve("infra/caddy/Caddyfile")).stream()
@@ -243,8 +350,13 @@ class DeploymentFilesTests {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Map<String, Object>> services(String composeFile) throws IOException {
-        Map<String, Object> compose = new Yaml().load(Files.readString(REPO_ROOT.resolve(composeFile)));
-        return (Map<String, Map<String, Object>>) compose.get("services");
+        return (Map<String, Map<String, Object>>) compose(composeFile).get("services");
+    }
+
+    /** A compose file as YAML; compose's own merge tags are dropped, SnakeYAML doesn't know them. */
+    private static Map<String, Object> compose(String composeFile) throws IOException {
+        String yaml = Files.readString(REPO_ROOT.resolve(composeFile)).replaceAll("!(reset|override)\\b", "");
+        return new Yaml().load(yaml);
     }
 
     private static Path findRepoRoot() {

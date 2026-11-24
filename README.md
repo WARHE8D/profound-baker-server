@@ -20,7 +20,7 @@ a module can later become its own service.
 | `catalog` | Items, categories, prices, stock and images. |
 | `ordering` | Orders, working hours and blocked dates (availability), invoices, dashboard. |
 | `app` | The Spring Boot application: security, CORS, rate limits, request ids, observability config. |
-| `infra/` | Caddy, the backup job, Prometheus, Tempo and Grafana configuration. |
+| `infra/` | Caddy, the backup job, Prometheus, Tempo and Grafana configuration, and the e2e stack's restore script. |
 
 Each module keeps its tables in its own Postgres schema (`identity`, `catalog`, `ordering`) with its own
 migrations in `<module>/src/main/resources/db/migration/<module>/`.
@@ -207,6 +207,57 @@ docker compose -f docker-compose.prod.yml exec backup sh -c \
     'createdb restore_check && pg_restore --no-owner -d restore_check "$(ls -1 /backups/baker-*.dump | tail -n 1)" \
      && psql -d restore_check -c "SELECT count(*) FROM ordering.orders" && dropdb restore_check'
 ```
+
+## End-to-end stack for the web app
+
+profound-baker-web's end-to-end tests run against the production stack with `docker-compose.e2e.yml`
+layered on top, filled with a **copy** of production's data. It is never run against production itself:
+the tests rewrite the bakery's profile and working hours, add an item and place orders. It runs as its
+own project (`sugarcrumbs-e2e`), so it can run beside the production stack without touching it. It has
+no backups or observability services, and no ports 80/443.
+
+| URL | What |
+|---|---|
+| <http://localhost:8080> | The API, for the SPA on `vite preview` (`http://localhost:4173`). |
+| <http://localhost:8081> | The site as deployed: web app and API behind the production Caddyfile, on plain HTTP. Use `localhost`, not `127.0.0.1`: Caddy only answers for its site address. |
+
+```bash
+E2E="docker compose -f docker-compose.prod.yml -f docker-compose.e2e.yml --env-file .env.e2e"
+$E2E up -d --build --wait          # restore the newest dump in ./backups and start everything
+$E2E logs -f app                   # or db-restore / uploads-restore: which dump was loaded
+$E2E down                          # the database lives in memory: the next `up` restores afresh
+$E2E down -v                       # also drop the e2e uploads volume
+```
+
+**Which data.** On start, `db-restore` loads the newest `baker-*.dump` in `E2E_BACKUP_DIR` (default
+`./backups`, where production's backup job writes), or the file `E2E_DUMP` names. `uploads-restore` then
+extracts the `uploads-*.tar.gz` taken with it. With no dump the bakery starts empty and the app creates the
+e2e Owner itself. Either way the tests sign in as `owner@e2e.test` / `e2e-owner-password` (`.env.e2e`,
+matching profound-baker-web's `e2e/support/env.ts`): on a copy, `infra/e2e/restore.sh` gives the real
+Owner that login and deletes production's refresh tokens. `up` on a running stack keeps the loaded data.
+To load a newer dump, run `down` and then `up`.
+
+To test on a dev machine, copy a dump from the server:
+
+```bash
+scp '<user>@<server>:/path/to/profound-baker-server/backups/baker-<UTC time>.dump' \
+    '<user>@<server>:/path/to/profound-baker-server/backups/uploads-<UTC time>.tar.gz' backups/
+```
+
+Dumps hold guests' names, phone numbers and emails. `backups/` is git-ignored. Keep copies off shared
+machines, and delete them when you're done.
+
+**An unpublished web build.** By default `web` is the published
+`ghcr.io/warhe8d/profound-baker-web:${WEB_IMAGE_TAG:-latest}`. To build a checkout instead, add the third
+file:
+
+```bash
+WEB_DIR=../profound-baker-web docker compose -f docker-compose.prod.yml -f docker-compose.e2e.yml \
+    -f docker-compose.e2e-web.yml --env-file .env.e2e up -d --build --wait
+```
+
+CI starts this stack empty on every push (`e2e-stack` job), so a change to the production compose file
+that breaks it fails here.
 
 ## Observability
 
